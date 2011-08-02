@@ -1,0 +1,481 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD HTML 4.01//EN">
+<html lang="en">
+  <head>
+    <title>EA Replay File Structure</title>
+    <meta http-equiv="Content-Type" content="text/html; charset=iso-8859-1">
+    <meta http-equiv="Content-Style-Type" content="text/css">
+    <meta name="ROBOTS" content="FOLLOW">
+    <style type="text/css">
+      html { margin: 0; padding: 0; border: none; font-family: Calibri; }
+      div.listing { white-space: pre; font-family: Consolas, "DejaVu Sans Mono", Courier, monospace; font-size: .8em; line-height: 1.5em;
+                    border: 1px solid navy; margin: 0 2em; padding: 1em; background-color: #FFE; }
+      table { margin: 0 auto; border-collapse: collapse; border-top: 2px solid black; border-bottom: 2px solid black; }
+      thead tr { border-bottom: 1px solid black; }
+      td, th { text-align: left; margin: 0; padding: .5ex 1ex; }
+    </style>
+  </head>
+  <body>
+    <h1>EA Replay File Formats</h1>
+
+    <p>Each replay file consists of the following global structure:</p>
+    <ol>
+      <li>Header</li>
+      <li>Chunks (variable length, arbitrary in number)</li>
+      <li>End-of-chunks terminator</li>
+      <li>Footer</li>
+    </ol>
+    <p>We use the following data types.</p>
+    <ul>
+      <li><strong>char</strong>: one byte, for use in arrays for plain text</li>
+      <li><strong>byte</strong>: one byte, used for numeric values</li>
+      <li><strong>uint16_t</strong>: unsigned two-byte integer, stored in little-endian order</li>
+      <li><strong>uint32_t</strong>: unsigned four-byte integer, stored in little-endian order</li>
+      <li><strong>tb_ch</strong>: An unsigned two-byte value used to represent a BMP Unicode codepoint, stored in little-endian order
+      <li><strong>tb_str</strong>: null-terminated array of tb_ch's, to be interpreted as raw BMP Unicode codepoints (?)</li>
+    </ul>
+
+    <p>It is not clear whether two-byte strings are fixed-width strings of raw BMP Unicode codepoints or variable-width UTF-16LE strings.
+    In the absence of non-BMP characters, the two are essentially identical.</p>
+
+
+    <h2>Tiberium Wars / Kane&rsquo;s Wrath / Red Alert 3</h2>
+
+    <h3>Differences</h3>
+    <p>In <em>Tiberium Wars</em> and <em>Kane&rsquo;s Wrath</em>, MAGIC_SIZE is 18, U1_SIZE is 33 and U2_SIZE is 19,
+    in <em>Red Alert 3</em> MAGIC_SIZE is 17, U1_SIZE is 31 and U2_SIZE is 20.</p>
+
+    <h3>Header</h3>
+
+    <p>The global header structure is as follows. Note that there are small differences depending
+    on whether the replay is from a multiplayer or from a skirmish game, distinguished by the value
+    of <strong>hnumber1</strong>.</p>
+
+    <div class="listing">char      str_magic[MAGIC_SIZE]; // == "C&amp;C3 REPLAY HEADER" or "RA3 REPLAY HEADER"
+byte      hnumber1;              // My guess: skirmish (0x04) vs. multiplayer (0x05)
+uint32_t  vermajor;              // 0x01
+uint32_t  verminor;              // 0x00,...,0x09
+uint32_t  buildmajor;
+uint32_t  buildminor;
+
+byte      hnumber2;              // My guess: No commentary = 0x06, with commentary track = 0x1E
+byte      zero1;                 // == 0x00
+
+tb_str    match_title;
+tb_str    match_description;
+tb_str    match_map_name;
+tb_str    match_map_id;
+
+byte      number_of_players;
+player_t  player_data[number_of_players];
+
+uint32_t  zero2;                 // == 0x000000
+
+tb_str    another_name;
+
+IF hnumber1 == 0x05
+  byte    another_number;
+ENDIF
+
+uint32_t  offset;
+uint32_t  str_repl_length;                 // always == 8
+char      str_repl_magic[str_repl_length]; // == "CNC3RPL\0"
+
+IF game is Tiberium Wars or Red Alert 3
+  char    mod_info[22];
+ENDIF
+
+uint32_t   timestamp;
+
+byte       unknown1[U1_SIZE];    // usually all zero
+
+uint32_t   header_len;
+char       header[header_len];   // not null-terminated!
+byte       replay_saver;
+uint32_t   zero3;                // == 0x000000
+uint32_t   zero4;                // == 0x000000
+uint32_t   filename_length;
+tb_ch      filename[filename_length];
+tb_ch      date_time[8];
+uint32_t   vermagic_len;
+char       vermagic[vermagic_len];
+uint32_t   magic_hash;
+
+uint32_2   unknown2[U2_SIZE];</div>
+
+    <p>The header contains a variable number of player records, described by the following <strong>player_t</strong> pseudo-structure of variable length.</p>
+    <div class="listing">uint32_t  player_id;
+tb_str    player_name;
+IF hnumber1 == 0x05
+  byte    team_number;
+ENDIF</div>
+
+    <p>The values in the header are mostly self-explanatory, though some remarks are in order.</p>
+    <ul>
+      <li>In <em>Tiberium Wars</em> and <em>Red Alert 3</em>, there is a 22-byte field <strong>mod_info</strong>. This is tokenized into
+      null-terminated strings with information about the mod used for the replay. The default game mod names are "CNC3" and "RA3", respectively.
+      The entire field is absent in <em>Kane&rsquo;s Wrath</em> replays.</li>
+      <li>The <strong>timestamp</strong> is a standard Unix timestamp for the date and time in GMT.</li>
+      <li><strong>replay_saver</strong> is the 0-based index of the player who saved the replay.</li>
+      <li>The values of <strong>date_time</strong> have the following meaning: 0: year, 1: month, 2: weekday (0-6 = Sun-Sat), 3: day, 4: hour, 5: minute, 6: second. The meaning of value 7 is unknown.</li>
+      <li>The string <strong>vermagic</strong> consists of a textual represention of the version and build as already contained
+      in the corresponding header fields.</li>
+      <li>The 32-bit <strong>magic_hash</strong> seems to be an invariant of the game version/mod, but it is not clear how it is derived.</li>
+      <li>The value of <strong>offset</strong> is the difference between the beginning of the first chunk and the beginning of the &ldquo;CNC3RPL\0&rdquo; magic
+      (<strong>str_repl_magic</strong>).</li>
+      <li>The meaning of the data in <strong>unknown1</strong> and <strong>unknown2</strong> is unknown.</li>
+      <li>The bulk of header information is contained in the plain-text string <strong>header</strong>. This is a semicolon-separated list of items of the form &ldquo;key&nbsp;=&nbsp;value&rdquo;. When the key is &ldquo;S&rdquo;, the value is a colon-separated list of items. Each item describes one player slot (including observers and commentators), and each item consists of a comma-separated list of tokens. The first token is of the form &ldquo;H<em>name</em>&rdquo;, where <em>name</em> is the player name; the second token is the IP address (ASCII represention of a hexadecimal number), the sixth token specifies the faction.</li>
+    </ul>
+
+    <h3>The replay body</h3>
+
+    <p>The main body of a replay file consists of &ldquo;chunks&rdquo;. Each chunk is of the following form.</p>
+    <div class="listing">uint32_t         time_code;
+byte             chunk_type;   // 1, 2, 3 or 4
+uint32_t         chunk_size;
+byte[chunk_size] data;
+uint32_t         zero;         // == 0x00000000</div>
+    <p>Chunks have to be read consecutively. The end of the chunks is signalled when <strong>time_code</strong> takes the value 0x7FFFFFFF, in which case
+    <em>there is no more data following the time code</em> and the footer follows.</p>
+
+    <p>One unit of time code corresponds to two frames, i.e. 1/15th of a second.</p>
+
+    <p>The meaning and structure of replay chunks is discussed further below.</p>
+
+    <h3>Footer</h3>
+
+    <p>The footer contains the time code of the final chunk. This makes it possible to determine the duration
+    of the replay without walking through the entire file.</p>
+
+    <p>In <em>Tiberium Wars</em> and <em>Kane&rsquo;s Wrath</em>, the footer takes one of the following two form, where UFOOT is either 6 or 1.</p>
+
+    <div class="listing">char      footer_str[18];   // == "C&amp;C3 REPLAY FOOTER"
+uint32_t  final_time_code;
+byte      data[UFOOT];      // { 0x01, 0x02, 0x00, 0x00, 0x00, 0x00 } or { 0x02 }
+uint32_t  footer_length;    // either 0x20 for UFOOT == 6 or 0x1B for UFOOT == 1</div>
+
+    <p>In <em>Red Alert 3</em>, the footer takes the following form.</p>
+
+    <div class="listing">char      footer_str[17];   // == "RA3 REPLAY FOOTER"
+uint32_t  final_time_code;
+byte      data[42];         // usually { 0x01, 0x02, 0x24, 0x00, 0x00, 0x00 } + uint32_t[9]
+uint32_t  footer_length;    // == 0x43 == 67 </div>
+
+    <p>In any case, the meaning of <strong>data</strong> is unknown.</p>
+
+    <h3>Replay chunks in Tiberium Wars / Kane&rsquo;s Wrath / Red Alert 3</h3>
+
+    <p>Each replay chunk appears to come in one of four types, indicated by the value of <strong>chunk_type</strong>.</p>
+
+    <p>Chunk types 3 and 4 only appear to be present in replays with a commentary track, and it seems that type 3
+    contains the audio data and type 4 the telestrator data.</p>
+
+    <p>Let us focus on chunk types 1 and 2. We always have data[0] ==
+    1. For chunks of type 2 we also have data[1] == 0, while for
+    chunks of type 1 we always find that the last byte is 0xFF. Let us thus
+    define the <em>payload data</em> for both chunk types.</p>
+
+    <p><strong>Type 1:</strong> data[chunk_size] has the following structure.</p>
+    <div class="listing">byte;              // == 1
+uint32_t           number_of_commands;
+byte[chunk_size-5] payload;</div>
+
+    <p>The payload contains a number of separate commands, as indicated by <strong>number_of_commands</strong>.
+    Each command is terminated by a variable byte sequence; {0xFF}, {0x00, 0xFF}, or {0x00, 0x00, 0xFF}.
+    Speculatively, if the command is of a fixed size, the terminator may be short; if the command is
+    of variable size, the terminator seems to be the three-byte version.</p>
+
+    <p>See below for a detailed discussion.</p>
+
+    <p><strong>Type 2:</strong> data[chunk_size] has the following structure.</p>
+    <div class="listing">byte;       // == 1
+byte;       // == 0
+uint32_t n; // maybe the player number, 0 &lt;= n &lt; number_of_players ?
+byte;       // == 0x0E in TW/KW, 0x0F in RA3
+uint32_t c; // == time_code;
+byte[chunk_size-11] payload;</div>
+
+    <p>It appears that type-2 chunks only ever appear with chunk_size 24 or 40, and <strong>n</strong> always satisfies the stated bounds.
+    Type-2 chunks of size 24 always appear to have first byte 0x01 and last byte 0x44 or 0x43.</p>
+
+    <p>It appears that chunks of type 2 contain per-player data, such as build orders and unit orders. Chunks of type 1 seem to contain camera movements.</p>
+
+    <h3>Type-1 Command Chunks</h3>
+
+    <p>Chunks of type 1 contain a variable number of commands; the number of commands is stored in <strong>number_of_commands</strong> and
+    the actual command codes are contained in <strong>payload</strong>. Each command is of the following form:</p>
+    <div class="listing">byte   command_id;
+byte   player_id;
+byte   code[command_size - 3];
+byte   terminator; // == 0xFF</div>
+
+    <p>The value of <strong>command_size</strong> depends on the command type, which is determined by <strong>command_id</strong>.
+    Some commands are of fixed size, but some are of variable size and one must look for the terminator. Speculatively,
+    if a command is of variable size, the terminator is in fact {0x00, 0x00, 0xFF}. Note that the byte 0xFF may occur
+    regularly inside a command (of fixed width?), so that the actual mapping from command_id to command_size is essential.</p>
+
+    <p>It is not clear how player ids are computed, although the appear to be ordered
+    in the order in which players appear in the (plain-text) header, and the number appears
+    to increment by 8 from player to player.</p>
+
+    <p>The creator of <a href="http://www.airlea.nl/kwrt/">TW/KW Replay Tool</a>, <em>Wmm</em>, has generously provided
+    his findings on the command types for <em>Red Alert 3</em>.</p>
+
+    <table>
+      <thead>
+        <tr><th>command_id</th><th>command_size</th><th>Description</th></tr>
+      </thead>
+      <tbody>
+<tr><td>0x00</td><td>45</td><td>Harder secundary ability, like the bunker of Soviet Combat Engineer??</td></tr>
+<tr><td>0x01</td><td><em>var.</em></td><td>At the end of every replay, just before the header. Shows the creator of the replay.</td></tr>
+<tr><td>0x02</td><td>32</td><td>Put really point.</td></tr>
+<tr><td>0x03</td><td>17</td><td>Upgrade for Allies and Empire.</td></tr>
+<tr><td>0x04</td><td>17</td><td></td></tr>
+<tr><td>0x05</td><td>20</td><td>Build unit.</td></tr>
+<tr><td>0x06</td><td>20</td><td>Cancel unit (two times to cancel it, first time is for hold, second for cancel).</td></tr>
+<tr><td>0x07</td><td>17</td><td>Start building building (only for Allies and Soviets, Empire Cores are seen as units).</td></tr>
+<tr><td>0x08</td><td>17</td><td>Cancel building (two times to cancel it, first time is for hold, second for cancel).</td></tr>
+<tr><td>0x09</td><td>35</td><td>Place building on map (only for Allies and Soviets).</td></tr>
+<tr><td>0x0A</td><td>8</td><td>Sell Building.</td></tr>
+<tr><td>0x0C</td><td><em>var.</em></td><td></td></tr>
+<tr><td>0x0D</td><td>8</td><td>Attack??</td></tr>
+<tr><td>0x0E</td><td>8</td><td></td></tr>
+<tr><td>0x0F</td><td>16</td><td></td></tr>
+<tr><td>0x10</td><td><em>var.</em></td><td></td></tr>
+<tr><td>0x12</td><td>8</td><td></td></tr>
+<tr><td>0x14</td><td>16</td><td>Move units.</td></tr>
+<tr><td>0x15</td><td>16</td><td></td></tr>
+<tr><td>0x16</td><td>16</td><td></td></tr>
+<tr><td>0x1A</td><td>3</td><td></td></tr>
+<tr><td>0x1B</td><td>3</td><td></td></tr>
+<tr><td>0x21</td><td>20</td><td>Unknown, all players in the replay seem to have this command the same amount.</td></tr>
+<tr><td>0x28</td><td>8</td><td></td></tr>
+<tr><td>0x29</td><td>8</td><td></td></tr>
+<tr><td>0x2A</td><td>3</td><td></td></tr>
+<tr><td>0x2C</td><td>29</td><td></td></tr>
+<tr><td>0x2E</td><td>12</td><td></td></tr>
+<tr><td>0x2F</td><td>12</td><td></td></tr>
+<tr><td>0x32</td><td>53</td><td>Harder Security Point usage like Surveillance Sweep.</td></tr>
+<tr><td>0x33</td><td><em>var.</em></td><td></td></tr>
+<tr><td>0x34</td><td>?</td><td></td></tr>
+<tr><td>0x35</td><td>?</td><td></td></tr>
+<tr><td>0x36</td><td>16</td><td></td></tr>
+<tr><td>0x37</td><td>56</td><td>Scrolling. Even if you don't scroll this command is there.</td></tr>
+<tr><td>0x47</td><td>8</td><td>Unknown, always appears in logical frame 5, and than this logical frame contains this command equally as the number of players.</td></tr>
+<tr><td>0x48</td><td>8</td><td></td></tr>
+<tr><td>0x4B</td><td><em>var.</em></td><td>Place beacon.</td></tr>
+<tr><td>0x4C</td><td>8</td><td>Delete beacon (F9 has something to do with this??).</td></tr>
+<tr><td>0x4D</td><td><em>var.</em></td><td>Place text in beacon.</td></tr>
+<tr><td>0x4E</td><td>8</td><td>Choose Security Point ability.</td></tr>
+<tr><td>0x5F</td><td>11</td><td></td></tr>
+<tr><td>0xF5</td><td><em>var.</em></td><td>Create selectionbox / Select building, units.</td></tr>
+<tr><td>0xF6</td><td><em>var.</em></td><td>Unknown. You get this command when building a Empire Dojo Core and deploying it. Than it should appear once, no idea what it does.</td></tr>
+<tr><td>0xF8</td><td>5</td><td>A click with the left mouse button.</td></tr>
+<tr><td>0xF9</td><td><em>var.</em></td><td></td></tr>
+<tr><td>0xFA</td><td><em>var.</em></td><td>Create group.</td></tr>
+<tr><td>0xFB</td><td>8</td><td>Select group.</td></tr>
+<tr><td>0xFC</td><td>8</td><td></td></tr>
+<tr><td>0xFD</td><td>13</td><td></td></tr>
+<tr><td>0xFE</td><td><em>var.</em></td><td>Simple use of secundary ability, like those of War Bear, Conscript and Flaktrooper.</td></tr>
+<tr><td>0xFF</td><td><em>var.</em></td><td>Simple select and klick Security Point usage like Sleeper Ambush.</td></tr>
+      </tbody>
+    </table>
+
+
+    <h2>Tiberian Twilight</h2>
+
+    <p>The replay format of <em>Tiberian Twilight</em> is a lot simpler than that of previous games. The header is less redundant, and header fields
+    start at fixed offsets, making direct parsing easier. The chunks are no longer separated by four zero bytes, and there are only two chunk types
+    (types 1 and 2), on account of the absence of a commentary/telestrator feature.</p>
+
+    <h3>Header</h3>
+
+    <div class="listing">uint32_t         file_version;      // == 7
+char             str_magic[11];     // == "CnC4RPLCnC4"
+byte             zero[18];          // all zero
+uint32_t         timestamp;         // Unix timestamp
+byte             zero[37];          // all zero
+uint32_t         header_len;        // Always at offset 0x4A
+char             header[header_len];
+byte             replay_saver;      // Player who saved the replay
+byte             zero[8];           // all zero
+uint32_t         filename_len;
+tb_ch            filename[filename_len];
+tb_ch            date_time[8];      // As in TW/KW/RA3
+uint32_t         vermagic_len;
+char             vermagic[vermagic_len];
+uint32_t         magic_hash;</div>
+
+    <p>Lots of other sparse data follows, in particular player data, all at fixed offsets. <em>Not yet analysed.</em></p>
+
+    <h3>The replay body</h3>
+
+    <p>The replay body consists of a sequence of chunks. The first chunk starts at the fixed offset <strong>0xFA8</strong>.
+    Chunks are of this form:</p>
+    <div class="listing">uint32_t         time_code;
+uint16_t         chunk_type;  // either 1 or 2
+uint16_t         chunk_size;
+byte             data[chunk_size];</div>
+
+    <p><strong>Type 1:</strong> data[chunk_size] has the following structure.</p>
+    <div class="listing">uint16_t         chunk_code;     // ???
+uint32_t         number_of_commands;
+byte             payload[chunk_size - 6];</div>
+    <p>The payload contains a number of separate commands, as indicated by <strong>number_of_commands</strong>.
+    Each command is terminated by the three bytes {0x00, 0x00, 0xFF}.</p>
+
+    <p><strong>Type 2:</strong> data[chunk_size] has the following structure.</p>
+    <div class="listing">byte              chunk_code;    // ????
+byte[2];                         // == { 0x01, 0x00 }
+uint32_t          player_number; // 0 to 9 (?)
+byte;                            // == 0x05;
+uint32_t          tc;            // == time_code
+byte              payload[chunk_size - 12];</div>
+    <p>Like in the previous games, type-2 chunks contain a player number, followed by a fixed byte (here 0x05), followed by
+    the chunk timecode again.</p>
+
+    <p><strong>End of replay:</strong> The replay finishes when <strong>time_code == 0xFFFFFFFF</strong> and
+    <strong>chunk_type == 0xFFFF</strong>. In that event, <strong>chunk_size</strong> contains the length of
+    the footer, and the replay is concluded by as many bytes, which constitute the footer. (In that sense,
+    the footer is merely another chunk of type 0xFFFF.)</p>
+
+    <p>It appears that the footer chunk size is always 64, so the footer chunk is 72 bytes long.</p>
+
+
+    <h2>Generals, Zero Hour, Battle for Middle Earth, Return of the Witchking</h2>
+
+    <p>The replay format of the games <em>Generals</em>, <em>Zero
+    Hour</em>, <em>Battle for Middle Earth</em> and <em>Battle for Middle
+    Earth 2</em> (and its community mod <em>Return of the Witch King</em>)
+    are considerably simpler than that of the later games. Most
+    notably, the chunks do not have length information, so one must
+    know their sizes by other means. Also, there is no footer, just a
+    final chunk.</p>
+
+    <h3>Header</h3>
+
+    <p>The size <var>u1</var> is 12 for <em>Generals</em> and <em>Zero Hour</em>, and 21 in the BfME games; <var>u2</var> is 8 in CCG/ZH and 13 in the BfME games; <var>u3</var> is 4 except in BfME2, where it is 6.</p>
+
+    <div class="listing">char             str_magic[6/8];     // == "GENREP", "BFMEREPL" or "BFME2RPL"
+uint32_t         timestamp_begin;
+uint32_t         timestamp_end;
+byte             unknown1[u1];
+tb_str           str_filename;
+tb_ch            date_time[8];       // as in TW/KW
+tb_str           str_version;
+tb_str           str_build_date;
+uint16_t         version_minor;
+uint16_t         version_major;
+byte             magic_hash[u2]
+char             header[];           // null-terminated!
+uint16_t         unknown2;
+uint32_t         unkonwn3[u3];</div>
+
+    <p><strong>Remarks.</strong> The two timestamps appear to indicate the real-world start and end time of the game. The <strong>header</strong> is of the same format as the later games.</p>
+
+    <h3>The replay body</h3>
+
+    <p>The replay body consists of a sequence of <em>chunks</em>. Each chunk is of the following form:</p>
+    <div class="listing">uint32_t         time_code;
+uint32_t         chunk_code;
+uint32_t         number;         // Player number?
+byte             number_of_commands;
+struct { byte cmd, byte nargs } signature[number_of_commands];
+byte             arguments[];    // variable!</div>
+    <p>In the simplest case, <strong>number_of_commands</strong> is
+    zero and <strong>signature</strong> and <strong>arguments</strong>
+    are empty. Otherwise, there are <strong>number_of_commands</strong> many
+    pairs of bytes {<strong>cmd</strong>,<strong>nargs</strong>}, where <strong>cmd</strong>
+    refers to one of about ten commands and <strong>nargs</strong> is the
+    number of arguments. The size of an argument depends on the command type.
+    Finally, <strong>arguments</strong> consists of all the arguments of all
+    the commands, simply one after the other.</p>
+
+    <p>The meaning of the chunk codes is unknown in general. Only a handful of values
+    seem to occur, all in the range 0x300 &ndash; 0x500, and 0x1B, 0x1D. Many codes only
+    ever seem to appear with a fixed, specific signature of commands.</p>
+
+    <p>These are the known commands and their argument sizes.</p>
+
+    <table>
+      <thead>
+        <tr><th>command</th><th>argument size (bytes)</th><th>Description/Notes</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>0x00</td><td>4</td><td>?</td></tr>
+        <tr><td>0x01</td><td>4</td><td>?</td></tr>
+        <tr><td>0x02</td><td>1</td><td>?</td></tr>
+        <tr><td>0x03</td><td>4</td><td>?</td></tr>
+        <tr><td>0x04</td><td>4</td><td>?</td></tr>
+        <tr><td>0x06</td><td>12</td><td>3 uint32_t's? 1 long double?</td></tr>
+        <tr><td>0x07</td><td>12</td><td>3 uint32_t's? 1 long double?</td></tr>
+        <tr><td>0x08</td><td>16</td><td>4 uint32_t's?</td></tr>
+        <tr><td>0x09</td><td>4/16</td><td>4 bytes in BFME2, 16 otherwise</td></tr>
+        <tr><td>0x0A</td><td>4</td><td>4 uint32_t's?</td></tr>
+      </tbody>
+    </table>
+
+    <p>There is no footer. The final chunk has <strong>number_of_commands</strong> set to zero, and it appears to have command code 0x1B or 0x1D.</p>
+
+    <h2>Utility functions</h2>
+
+    <p>Here is an example function for converting a raw Unicode codepoint into a UTF-8-encoded string
+    (restricted to at most 4 bytes, not the theoretical maxiumum of 6 bytes).</p>
+    <div class="listing">typedef union _codepoint_t
+{
+  char c[4];
+  unsigned char u[4];
+  unsigned int i;
+} codepoint_t;
+
+void codepointToUTF8(unsigned int cp, codepoint_t * szOut)
+{
+  size_t len = 0;
+
+  szOut-&gt;u[0] = szOut-&gt;u[1] = szOut-&gt;u[2] = szOut-&gt;u[3] = 0;
+
+  if (cp &lt; 0x0080) len++;
+  else if (cp &lt; 0x0800) len += 2;
+  else len += 3;
+
+  int i = 0;
+  if (cp &lt; 0x0080)
+    szOut-&gt;u[i++] = (unsigned char) cp;
+  else if (cp &lt; 0x0800)
+  {
+    szOut-&gt;u[i++] = 0xc0 | (( cp ) &gt;&gt; 6 );
+    szOut-&gt;u[i++] = 0x80 | (( cp ) &amp; 0x3F );
+  }
+  else
+  {
+    szOut-&gt;u[i++] = 0xE0 | (( cp ) &gt;&gt; 12 );
+    szOut-&gt;u[i++] = 0x80 | (( ( cp ) &gt;&gt; 6 ) & 0x3F );
+    szOut-&gt;u[i++] = 0x80 | (( cp ) &amp; 0x3F );
+  }
+}
+
+// Result can be retrieved e.g. via std::string(szOut-&gt;c)</div>
+
+    <p>The above function can be used to read a null-terminated string of type <strong>tb_str</strong> and
+    store the result as a UTF-8-encoded string:</p>
+
+    <div class="listing">std::string read2ByteString(std::istream & in)
+{
+  codepoint_t     ccp;
+  char        cbuf[2];
+  std::string       s;
+
+  while (true)
+  {
+    in.read(&amp;cbuf, 2);
+    if (cbuf[0] == 0 &amp;&amp; cbuf[1] == 0) break;
+    codepointToUTF8(((unsigned int)(cbuf[1]) &lt;&lt; 8) | ((unsigned int)(cbuf[0])), &amp;ccp);
+    s += std::string(ccp.c);
+  }
+
+  return s;
+}</div>
+
+
+  </body>
+</html>
+
