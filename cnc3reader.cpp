@@ -3,7 +3,7 @@
  * Handle with care.        
  *
  * Compile like this:
- *  g++ -O2 -s -o replayreader.exe replayreader.cpp -enable-auto-import -static-libgcc -static-libstdc++ -fwhole-program
+ *  g++ -O2 -s -o cnc3reader.exe cnc3reader.cpp -enable-auto-import -static-libgcc -static-libstdc++ -fwhole-program
 
  *
  *****************************/
@@ -988,7 +988,12 @@ void parse_replay_file(const char * filename, Options & opts)
 
   if (!opts.dumpchunks && !opts.apm && !opts.printraw)
   {
-    myfile.seekg((opts.gametype == Options::GAME_RA3 ? -50 : (hnumber1 == 4 ? -9 : -14)), std::fstream::end);
+    uint32_t footer_offset;
+    myfile.seekg(-4, std::fstream::end);
+    myfile.read(reinterpret_cast<char*>(&footer_offset), 4);
+    fprintf(stdout, "Footer length is %u. ", footer_offset);
+
+    myfile.seekg((opts.gametype == Options::GAME_RA3 ? 17 : 18) - int(footer_offset), std::fstream::end);
     myfile.read(reinterpret_cast<char*>(&dummy), 4);
     fprintf(stdout, "Footer chunk number: 0x%08X (timecode: %s).\n", dummy, timecode_to_string(dummy).c_str());
     return;
@@ -1030,7 +1035,7 @@ void parse_replay_file(const char * filename, Options & opts)
       }
       else
       {
-        std::cerr << "Error: Unexpected end of file! Aborting. Try 'replayreader -f " << lastgood
+        std::cerr << "Error: Unexpected end of file! Aborting. Try 'cnc3reader -f " << lastgood
                   << (opts.gametype == Options::GAME_RA3 ? " -r" : opts.gametype == Options::GAME_KW ? " -k" : " -w")
                   << " " << filename << "' for fixing." << std::endl;
         return;
