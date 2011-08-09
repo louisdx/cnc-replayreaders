@@ -509,7 +509,8 @@ const uint32_t ZERO = 0x0;
 const uint32_t NONZERO = 0x43;
 const char FOOTERCC[] = "C&C3 REPLAY FOOTER";
 const char FOOTERRA3[] = "RA3 REPLAY FOOTER";
-const char FINALCC[] = { 0x01, 0x02, 0x00, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00 };
+const char FINALCC20[] = { 0x01, 0x02, 0x00, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00 };
+const char FINALCC1B[] = { 0x02, 0x1B, 0x00, 0x00, 0x00 };
 const char FINALRA3[] = { 0x01, 0x02, 0x24, 0x00, 0x00, 0x00 };
 
 void fix_replay_file(const char * filename, Options & opts)
@@ -595,7 +596,7 @@ void fix_replay_file(const char * filename, Options & opts)
   {
     yourfile.write(FOOTERCC, 18);
     yourfile.write(reinterpret_cast<char*>(&time_code), 4);
-    yourfile.write(FINALCC, 10);
+    yourfile.write(FINALCC1B, 5);
   }
 
 }
@@ -995,7 +996,8 @@ void parse_replay_file(const char * filename, Options & opts)
 
     myfile.seekg((opts.gametype == Options::GAME_RA3 ? 17 : 18) - int(footer_offset), std::fstream::end);
     myfile.read(reinterpret_cast<char*>(&dummy), 4);
-    fprintf(stdout, "Footer chunk number: 0x%08X (timecode: %s).\n", dummy, timecode_to_string(dummy).c_str());
+    fprintf(stdout, "Footer chunk number: 0x%08X (timecode: %s); %u bytes / %u frames = %.2f Bpf = %.2f Bps.\n",
+            dummy, timecode_to_string(dummy).c_str(), filesize, dummy, double(filesize) / dummy, double(filesize) * 15.0 / dummy);
     return;
   }
 
