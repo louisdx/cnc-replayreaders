@@ -199,7 +199,7 @@ struct Options
   enum GameType { GAME_UNDEF = 0, GAME_KW, GAME_TW, GAME_RA3 };
 
   Options() : type(-1), fixpos(0), fixfn(NULL), audiofn(NULL),
-              autofix(false), dumpchunks(false), dumpaudio(false), filter_heartbeat(false), printraw(false),
+              autofix(false), breakonerror(false), dumpchunks(false), dumpaudio(false), filter_heartbeat(false), printraw(false),
               apm(false), fixbroken(false), gametype(GAME_UNDEF), verbose(false) {}
 
   int type;
@@ -207,6 +207,7 @@ struct Options
   const char * fixfn;
   const char * audiofn;
   bool autofix;
+  bool breakonerror;
   bool dumpchunks;
   bool dumpaudio;
   bool filter_heartbeat;
@@ -423,7 +424,7 @@ bool parse_options(int argc, char * argv[], Options & opts)
 {
   int opt;
 
-  while ((opt = getopt(argc, argv, "A:t:f:F:gaRckwrpHvh")) != -1)
+  while ((opt = getopt(argc, argv, "A:t:f:F:egaRckwrpHvh")) != -1)
   {
     switch (opt)
     {
@@ -437,6 +438,9 @@ bool parse_options(int argc, char * argv[], Options & opts)
       break;
     case 'g':
       opts.autofix = true;
+      break;
+    case 'e':
+      opts.breakonerror = true;
       break;
     case 'a':
       opts.dumpaudio = true;
@@ -475,7 +479,7 @@ bool parse_options(int argc, char * argv[], Options & opts)
     case 'h':
     default:
       std::cout << std::endl
-                << "Usage:  cnc3reader [-c|-R] [-a] [-A audiofilename] [-w|-k|-r] [-t type] [-g] filename [filename]..." << std::endl
+                << "Usage:  cnc3reader [-c|-R] [-a] [-A audiofilename] [-w|-k|-r] [-t type] [-g] [-e] filename [filename]..." << std::endl
                 << "        cnc3reader -f pos [-F name] [-w|-k|-r] filename" << std::endl
                 << "        cnc3reader -h" << std::endl << std::endl
                 << "        -c:          dump chunks (smart parsing)" << std::endl
@@ -487,6 +491,7 @@ bool parse_options(int argc, char * argv[], Options & opts)
                 << "        -f pos:      attempt to fix the replay file from last good position pos" << std::endl
                 << "        -F name:     output filename for fixed replay file" << std::endl
                 << "        -g:          automatically attempt to fix broken replays" << std::endl
+                << "        -e:          stop processing if an error occurs and return non-zero return value" << std::endl
                 << "        -h:          print usage information (this)" << std::endl
                 << std::endl;
       return false;
@@ -601,7 +606,7 @@ void fix_replay_file(const char * filename, Options & opts)
 
 }
 
-void parse_replay_file(const char * filename, Options & opts)
+bool parse_replay_file(const char * filename, Options & opts)
 {
   header_cnc3_t header;
   header_ra3_t header_ra3;
@@ -621,7 +626,7 @@ void parse_replay_file(const char * filename, Options & opts)
 
   std::cerr << "Opening file \"" << filename << "\"...";
   std::ifstream myfile(filename, std::ios::in | std::ios::binary);
-  if (!myfile) { std::cerr << " failed!" << std::endl; return; }
+  if (!myfile) { std::cerr << " failed!" << std::endl; return false; }
 
   myfile.seekg(0, std::fstream::end);
   int filesize = myfile.tellg();
@@ -637,7 +642,7 @@ void parse_replay_file(const char * filename, Options & opts)
     if (opts.audiofn == NULL)
     {
       std::cerr << "Error: You must specify the audio dump filename with the \"-A\" option." << std::endl;
-      return;
+      return false;
     }
 
     std::cerr << "Attempting to dump audio tracks!" << std::endl;
@@ -653,7 +658,7 @@ void parse_replay_file(const char * filename, Options & opts)
     }
   }
 
-  /* Unless explicitly overridded, set the game type according to filename */
+  /* Unless explicitly overridden, set the game type according to filename */
   if (opts.gametype == Options::GAME_UNDEF)
   {
     std::string fn(filename);
@@ -695,7 +700,7 @@ void parse_replay_file(const char * filename, Options & opts)
        )
     {
       std::cerr << "File does not seem to be a replay file." << std::endl;
-      return;
+      return false;
     }
     hnumber1 = header.number1;
     hsix = header.six;
@@ -712,7 +717,7 @@ void parse_replay_file(const char * filename, Options & opts)
        )
     {
       std::cerr << "File does not seem to be a RA3 replay file." << std::endl;
-      return;
+      return false;
     }
     hnumber1 = header_ra3.number1;
     hsix = header_ra3.six;
@@ -998,7 +1003,7 @@ void parse_replay_file(const char * filename, Options & opts)
     myfile.read(reinterpret_cast<char*>(&dummy), 4);
     fprintf(stdout, "Footer chunk number: 0x%08X (timecode: %s); %u bytes / %u frames = %.2f Bpf = %.2f Bps.\n",
             dummy, timecode_to_string(dummy).c_str(), filesize, dummy, double(filesize) / dummy, double(filesize) * 15.0 / dummy);
-    return;
+    return true;
   }
 
   apm_map_t player_apm;
@@ -1033,14 +1038,14 @@ void parse_replay_file(const char * filename, Options & opts)
         std::cerr << "Warning: Unexpected end of file! Auto fix is requested, attempting to fix this replay. (Params: " << opts.fixfn << ", " << opts.fixpos << ")" << std::endl;
         myfile.close();
         fix_replay_file(filename, opts);
-        return;
+        return true;
       }
       else
       {
         std::cerr << "Error: Unexpected end of file! Aborting. Try 'cnc3reader -f " << lastgood
                   << (opts.gametype == Options::GAME_RA3 ? " -r" : opts.gametype == Options::GAME_KW ? " -k" : " -w")
                   << " " << filename << "' for fixing." << std::endl;
-        return;
+        return false;
       }
     }
 
@@ -1087,7 +1092,11 @@ void parse_replay_file(const char * filename, Options & opts)
               opos = pos;
               if (pos == len) break;
             }
-            else { fprintf(stdout, "PANIC: fixed command length (%u) does not lead to terminator!\n", c->second); return; }
+            else
+            {
+              fprintf(stdout, "PANIC: fixed command length (%u) does not lead to terminator!\n", c->second);
+              return false;
+            }
           }
           else
           {
@@ -1191,7 +1200,7 @@ void parse_replay_file(const char * filename, Options & opts)
         hexdump(stdout, buf, len+4, "XYZZY   ");
         fprintf(stdout, "\n");
 
-        return;
+        return false;
       }
     }
     else if (opts.apm)
@@ -1295,6 +1304,8 @@ void parse_replay_file(const char * filename, Options & opts)
     myfile.read(reinterpret_cast<char*>(&hlen), 4);
     fprintf(stdout, "Numbers in the footer: %u %u %u %u.\n", dummy3[0], dummy3[1], dummy, hlen);
   }
+
+  return true;
 }
 
 int main(int argc, char * argv[])
@@ -1313,9 +1324,13 @@ int main(int argc, char * argv[])
   else
   {
     populate_command_map_RA3(RA3_commands);
+
     for ( ; optind < argc; ++optind)
     {
-      parse_replay_file(argv[optind], opts);
+      const bool res = parse_replay_file(argv[optind], opts);
+
+      if (!res && opts.breakonerror) return 1;
+
       std::cout << std::endl << std::endl;
     }
   }
