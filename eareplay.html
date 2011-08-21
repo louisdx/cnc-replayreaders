@@ -285,7 +285,8 @@ byte   terminator; // == 0xFF</div>
 
     <p>The replay format of <em>Tiberian Twilight</em> is a lot simpler than that of previous games. The header is less redundant, and header fields
     start at fixed offsets, making direct parsing easier. The chunks are no longer separated by four zero bytes, and there are only two chunk types
-    (types 1 and 2), on account of the absence of a commentary/telestrator feature.</p>
+    (types 1 and 2), on account of the absence of a commentary/telestrator feature. Zero-terminated two-byte strings appear padded with zeros inside
+    regions of fixed size on multiple occasions.</p>
 
     <h3>Header</h3>
 
@@ -294,7 +295,7 @@ char             str_magic[11];     // == "CnC4RPLCnC4"
 byte             zero[18];          // all zero
 uint32_t         timestamp;         // Unix timestamp
 byte             zero[37];          // all zero
-uint32_t         header_len;        // Always at offset 0x4A
+uint32_t         header_len;        // Always at offset 0x4A, max 1010 = 0x3F2
 char             header[header_len];
 byte             replay_saver;      // Player who saved the replay
 byte             zero[8];           // all zero
@@ -303,9 +304,26 @@ tb_ch            filename[filename_len];
 tb_ch            date_time[8];      // As in TW/KW/RA3
 uint32_t         vermagic_len;
 char             vermagic[vermagic_len];
-uint32_t         magic_hash;</div>
+uint32_t         magic_hash;
 
-    <p>Lots of other sparse data follows, in particular player data, all at fixed offsets. <em>Not yet analysed.</em></p>
+/* Lots of sparse data, not yet analysed */
+/* advance to offset 0x440 */
+
+char             match_title[512];  // padded tb_str
+char             match_desc[1024];  // padded tb_str
+char             map_name[512];     // padded tb_str
+player_data_t    player_data[10];   // see below
+char             zero[144];         // all zero
+uint32_t         unknown[2];        // appears to be { 10, 0 }
+</div>
+
+    <p>The <strong>player_data_t</strong> data contains the player ID, team number
+    (always 0 or 1) and the player's name, as a tb_str padded to 64 bytes:</p>
+
+    <div class="listing">uint32_t         player_id;
+uint32_t         player_team;       // either 0 or 1
+char             player_name[64];   // padded tb_str</div>
+
 
     <h3>The replay body</h3>
 

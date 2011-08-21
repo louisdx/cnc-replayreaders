@@ -51,5 +51,3 @@ The following compiler invocation should work for all programs:
 Windows users using MingW should add "-enable-auto-import -static-libgcc -static-libstdc++"
 to create free-standing executables without load-time dependencies on the C and C++ libraries.
 
-For cnc4reader, disabling strict aliasing with "-fno-strict-aliasing" is recommended.
-

@@ -38,6 +38,7 @@
 
 
 #define READ(f, x) do { f.read(reinterpret_cast<char*>(&x), sizeof(x)); } while (false)
+#define READ_UINT16LE(a, b)  ( ((unsigned int)(b)<<8) | ((unsigned int)(a)) )
 
 std::string timecode_to_string(unsigned int tc)
 {
@@ -117,6 +118,14 @@ void codepointToUTF8(unsigned int cp, codepoint_t * szOut)
   }
 }
 
+bool array_is_zero(const unsigned char * data, size_t n)
+{
+  for (size_t i = 0; i < n; ++i)
+    if (data[i] != 0)
+      return false;
+  return true;
+}
+
 std::string read2ByteStringN(std::istream & in, size_t N)
 {
   codepoint_t     ccp;
@@ -128,6 +137,28 @@ std::string read2ByteStringN(std::istream & in, size_t N)
   {
     in.read(reinterpret_cast<char*>(&cbuf), sizeof(twobytestring_t));
     codepointToUTF8(cbuf.byte1 + (cbuf.byte2 << 8), &ccp);
+    s += std::string(ccp.c);
+  }
+
+  return s;
+}
+
+std::string read2ByteString(const char * in, size_t N)
+{
+  codepoint_t     ccp;
+  twobytestring_t cbuf;
+  std::string     s;
+
+  while (N > 1)
+  {
+    cbuf.byte1 = *in++; --N;
+    cbuf.byte2 = *in++; --N;
+
+    if (READ_UINT16LE(cbuf.byte1, cbuf.byte2) == 0)
+      break;
+
+    codepointToUTF8(READ_UINT16LE(cbuf.byte1, cbuf.byte2), &ccp);
+
     s += std::string(ccp.c);
   }
 
@@ -173,7 +204,7 @@ int main(int argc, char * argv[])
 
   uint32_t N, Nlast = 0;
   uint16_t L, S;
-  char magic[11], timeout[200], player_who_saved;
+  char magic[11], timeout[200], matchbuf[1024], player_who_saved;
   std::vector<std::string> player_names;
   date_text_t datetime;
 
@@ -192,59 +223,136 @@ int main(int argc, char * argv[])
   
   READ(infile, N);
 
-  char * header = new char[N];
-  infile.read(header, N);
+  std::vector<char> header(N);
+  infile.read(header.data(), N);
 
   std::vector<std::string> tokens;
-  Tokenize(std::string(header), tokens, ";");
-  
-  for (size_t i = 0; i < tokens.size()-1; ++i)
+  Tokenize(std::string(header.begin(), header.end()), tokens, ";");
+
+  for (size_t i = 0; i < tokens.size(); ++i)
   {
     std::cout << "  " << tokens[i] << std::endl;
   }
   std::cout << std::endl;
 
-  if (tokens[tokens.size()-2][0] == 'S' && tokens[tokens.size()-2][1] == '=')
+  for (std::vector<std::string>::const_iterator it = tokens.begin(), end = tokens.end(); it != end; ++it)
   {
-    std::cout << std::endl << "Found player information, parsing..." << std::endl;
-    std::vector<std::string> subtokens;
-    Tokenize(tokens[tokens.size()-2].substr(2), subtokens, ":");
+    const std::string & token = *it;
 
-    for (size_t i = 0; i < subtokens.size(); ++i)
+    if (token[0] == 'S' && token[1] == '=')
     {
-      if (subtokens[i][0] != 'H') continue;
+      std::cout << std::endl << "Found player information, parsing..." << std::endl;
+      std::vector<std::string> subtokens;
+      Tokenize(token.substr(2), subtokens, ":");
 
-      std::vector<std::string> subsubtokens;
-      Tokenize(subtokens[i].substr(1), subsubtokens, ",");
+      for (size_t i = 0; i < subtokens.size(); ++i)
+      {
+        if (subtokens[i][0] != 'H') continue;
 
-      player_names.push_back(subsubtokens[0]);
+        std::vector<std::string> subsubtokens;
+        Tokenize(subtokens[i].substr(1), subsubtokens, ",");
 
-      std::cout << "  Player name: " << subsubtokens[0] << ", Faction: " <<  subsubtokens[6] << std::endl;
+        player_names.push_back(subsubtokens[0]);
+
+        std::cout << "  Player name: " << subsubtokens[0] << ", Faction: " <<  subsubtokens[6] << std::endl;
+      }
+      std::cout << std::endl;
+      break;
     }
-    std::cout << std::endl;
   }
 
   READ(infile, player_who_saved);
-  if (size_t(player_who_saved) < 12)
-    std::cout << "The player who saved this replay is: " << size_t(player_who_saved) << " (" << player_names[size_t(player_who_saved)] << ")." << std::endl;
-  infile.seekg(8, std::fstream::cur);
+
+  if (size_t(player_who_saved) < player_names.size())
+  {
+    std::cout << "The player who saved this replay is: " << size_t(player_who_saved)
+              << " (" << player_names[size_t(player_who_saved)] << ")." << std::endl;
+  }
+  else
+  {
+    std::cout << "The player who saved this replay is allegedly: " << size_t(player_who_saved) << std::endl;
+  }
+
+  infile.read(matchbuf ,8);
+  if (array_is_zero(reinterpret_cast<const unsigned char*>(matchbuf), 8))
+  {
+    std::cout << std::endl << "Skipping 8 expected zero bytes." << std::endl;
+  }
+  else
+  {
+    std::cout << std::endl << "Encountered 8 unexpected bytes:" << std::endl;
+    hexdump(stdout, reinterpret_cast<const unsigned char*>(matchbuf), 8, "  ");
+  }
 
   READ(infile, N);
   std::string filename = read2ByteStringN(infile, N);
-  std::cout << "Filename: " << filename << std::endl;
 
   READ(infile, datetime);
-  std::cout << "The literal timestamp says: \"" << weekday(datetime.data[2]) << ", " << std::setfill('0') << std::setw(4)
-            << datetime.data[0] << "-" << std::setw(2) << datetime.data[1] << "-" << datetime.data[3] << " " << std::setw(2)
-            << datetime.data[4] << ":" << datetime.data[5] << ":" << datetime.data[6]
-            << "\", followed by the number " << datetime.data[7] << "." << std::endl;
 
   READ(infile, N);
-  char * version = new char[N];
-  infile.read(version, N);
-  std::cout << "Version magic: \"" << std::string(version, N) << "\", followed by 0x";
+  std::vector<char> version(N);
+
+  infile.read(version.data(), N);
+
   READ(infile, N);
-  std::cout << std::hex << std::setw(8) << std::uppercase << N << std::endl;
+
+  std::cout << "Advancing to 0x440, skipping " << std::dec << (0x440 - infile.tellg()) << " bytes (not yet understood)." << std::endl;
+
+  std::cout << std::endl
+            << "Filename:          \"" << filename << "\"" << std::endl
+            << "Literal timestamp: \"" << weekday(datetime.data[2]) << ", " << std::setfill('0') << std::setw(4)
+            << datetime.data[0] << "-" << std::setw(2) << datetime.data[1] << "-" << datetime.data[3] << " " << std::setw(2)
+            << datetime.data[4] << ":" << datetime.data[5] << ":" << datetime.data[6]
+            << "\", followed by the number " << datetime.data[7] << "." << std::endl
+            << "Version magic:     \"" << std::string(version.begin(), version.end())
+            << "\", followed by 0x" << std::hex << std::setw(8) << std::uppercase << N << std::endl;
+
+  infile.seekg(0x440, std::fstream::beg);
+
+  infile.read(matchbuf, 512);
+  std::string match_name = read2ByteString(matchbuf, 512);
+
+  infile.read(matchbuf, 1024);
+  std::string match_desc = read2ByteString(matchbuf, 1024);
+
+  infile.read(matchbuf, 512);
+  std::string match_map = read2ByteString(matchbuf, 512);
+
+  std::cout << "Match name:        \"" << match_name << "\"" << std::endl
+            << "Match description: \"" << match_desc << "\"" << std::endl
+            << "Match map:         \"" << match_map  << "\"" << std::endl
+            << std::endl;
+
+  for (size_t i = 0; i != 10; ++i)
+  {
+    uint32_t player_id, player_team;
+    READ(infile, player_id);
+    READ(infile, player_team);
+    infile.read(matchbuf, 64);
+    std::string player_name = read2ByteString(matchbuf, 64);
+
+    std::cout << "Team " << player_team << " (ID: " << std::hex << std::setw(8) << player_id << "): " << player_name << std::endl;
+  }
+
+  infile.read(matchbuf, 144);
+
+  std::cout << std::endl;
+
+  if (!array_is_zero(reinterpret_cast<const unsigned char*>(matchbuf), 144))
+  {
+    std::cout << "Unexpected data in the 144 bytes after player data:" << std::endl;
+    hexdump(stdout, reinterpret_cast<const unsigned char*>(matchbuf), 144, "  ");
+  }
+  else
+  {
+    std::cout << "Skipping 144 expected zero bytes." << std::endl;
+  }
+
+  uint32_t mystery, dummy;
+  READ(infile, mystery);
+  READ(infile, dummy);
+
+  std::cout << "Mysterious numbers: " << std::dec << mystery << ", " << dummy << std::endl;
 
   if (!parse) return 0;
 
@@ -263,27 +371,28 @@ int main(int argc, char * argv[])
 
     if (S > 200) { std::cout << "At position " << infile.tellg() << " we read N = " << N << ", type = " << L << ", size = " << S << std::endl; return 1; }
 
-    char buf[S];
-    READ(infile, buf);
+    std::vector<char> vbuf(S);
+    infile.read(vbuf.data(), S);
+    const unsigned char * const buf = reinterpret_cast<const unsigned char*>(vbuf.data());
 
     if (parse == 1)
     {
       std::cout << "Chunk " << counter << " (size " << S << "), timecode " << timecode_to_string(N)
                 << " (" << N << "), type = " << L << ". Now at " << infile.tellg() << "." << std::endl;
-      hexdump(stdout, reinterpret_cast<unsigned char*>(buf), S, "  --> ");
+      hexdump(stdout, buf, S, "  --> ");
       std::cout << std::endl;
     }
     else if (parse == 2)
     {
       if (L == 1)
       {
-        std::cout << "Chunk type 1 (size " << S << "), timecode " << timecode_to_string(N) << ", number " << *reinterpret_cast<uint16_t*>(buf)
-                  << ", number of commands = " << *reinterpret_cast<uint32_t*>(buf+2) << ". Dissecting commands:" << std::endl;
+        std::cout << "Chunk type 1 (size " << S << "), timecode " << timecode_to_string(N) << ", number " << *reinterpret_cast<const uint16_t *>(buf)
+                  << ", number of commands = " << *reinterpret_cast<const uint32_t *>(buf+2) << ". Dissecting commands:" << std::endl;
         size_t p = 6, q = p;
         while (p < S)
         {
-          while (!(buf[p] == 0 && buf[p+1] == 0 && (unsigned char)(buf[p+2]) == 0xFF) && p < S) p++;
-          hexdump(stdout, reinterpret_cast<unsigned char*>(buf+q), p-q, " -----> ");
+          while (!(buf[p] == 0 && buf[p+1] == 0 && buf[p+2] == 0xFF) && p < S) p++;
+          hexdump(stdout, buf + q, p-q, " -----> ");
           p += 3;
           q = p;
         }
@@ -291,31 +400,34 @@ int main(int argc, char * argv[])
       }
       else if (L == 2)
       {
-        if (buf[1] == 1 && buf[2] == 0 && buf[7] == 5 && *reinterpret_cast<uint32_t*>(buf+8) == N)
+        if (buf[1] == 1 && buf[2] == 0 && buf[7] == 5 && *reinterpret_cast<const uint32_t*>(buf+8) == N)
         {
           std::cout << "Chunk type 2 (size " << S << "), timecode " << timecode_to_string(N) << ", number "
-                    << (unsigned int)(buf[0]) << ", player " << *reinterpret_cast<uint32_t*>(buf+3) << ". Payload:" << std::endl;
-          hexdump(stdout, reinterpret_cast<unsigned char*>(buf+12), S-12, " -2-> ");
+                    << (unsigned int)(buf[0]) << ", player " << *reinterpret_cast<const uint32_t *>(buf+3) << ". Payload:" << std::endl;
+          hexdump(stdout, buf + 12, S - 12, " -2-> ");
           std::cout << std::endl;
         }
         else
         {
           std::cout << "PANIC: Unexpected type-2 chunk. Size " << S << "), timecode " << timecode_to_string(N) << ". Raw data:" << std::endl;
-          hexdump(stdout, reinterpret_cast<unsigned char*>(buf), S, " -?-> ");
+          hexdump(stdout, buf, S, " -?-> ");
           std::cout << std::endl;
         }
       }
       else 
       {
         std::cout << "PANIC: Unknown chunk type (" << L << "). Size " << S << "), timecode " << timecode_to_string(N) << ". Raw data:" << std::endl;
-        hexdump(stdout, reinterpret_cast<unsigned char*>(buf), S, " -?-> ");
+        hexdump(stdout, buf, S, " -?-> ");
         std::cout << std::endl;
       }
     }
   }
+
   std::cout << "End of file reached normally. Footer is " << S << " bytes:" << std::endl;
-  char * footer = new char[S];
-  infile.read(footer, S);
-  hexdump(stdout, reinterpret_cast<unsigned char*>(footer), S, "  ==> ");
+
+  std::vector<char> footer(S);
+  infile.read(footer.data(), S);
+  hexdump(stdout, reinterpret_cast<unsigned char*>(footer.data()), S, "  ==> ");
+
   std::cout << std::endl;
 }
