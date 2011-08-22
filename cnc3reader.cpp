@@ -120,6 +120,7 @@
 #include <vector>
 #include <map>
 #include <algorithm>
+#include <stdexcept>
 #include <cstring>
 #include <cstdlib>
 #include <ctime>
@@ -798,9 +799,10 @@ bool parse_replay_file(const char * filename, Options & opts)
     exit(1);
   }
 
-  /* For TW there is this extra bit of info, char modinfo[22]. */
+  /* For TW, version ??, there is this extra bit of info, char modinfo[22]. */
   char modinfo[22];
-  if (opts.gametype == Options::GAME_UNDEF || opts.gametype == Options::GAME_TW)
+  if (opts.gametype == Options::GAME_UNDEF ||
+      (opts.gametype == Options::GAME_TW && READ_UINT32LE(header.verminor) >= 7))
   {
     myfile.read(modinfo, 22);
 
@@ -815,7 +817,7 @@ bool parse_replay_file(const char * filename, Options & opts)
     }
   }
 
-  if (opts.gametype == Options::GAME_TW)
+  if (opts.gametype == Options::GAME_TW && READ_UINT32LE(header.verminor) >= 7)
   {
     std::cout << "Interpreting file as Tiberium Wars replay. Mod info: ";
     char *p(modinfo), *q(NULL);
@@ -828,6 +830,10 @@ bool parse_replay_file(const char * filename, Options & opts)
       p = q+1;
     }
     std::cout << std::endl;
+  }
+  else if (opts.gametype == Options::GAME_TW)
+  {
+    std::cout << "Interpreting file as pre-1.7 Tiberium Wars replay." << std::endl;
   }
   else if (opts.gametype == Options::GAME_KW)
   {
@@ -863,46 +869,52 @@ bool parse_replay_file(const char * filename, Options & opts)
 
   myfile.read(reinterpret_cast<char*>(&hlen), 4);
 
-  char header2[hlen+1];
-  myfile.read(header2, hlen);
-  header2[hlen] = 0;
+  if (hlen > 10000) { throw std::length_error("Requested header length too big."); }
+
+  std::vector<char> header2(hlen);
+  myfile.read(header2.data(), hlen);
 
   if (opts.printraw)
-    std::cout << "Header string length: " << std::dec << hlen << ". Raw header data:" << std::endl << header2 << std::endl << std::endl;
+    std::cout << "Header string length: " << std::dec << hlen << ". Raw header data:" << std::endl
+              << std::string(header2.begin(), header2.end()) << std::endl << std::endl;
 
   std::cout << std::endl << "Header string length: " << std::dec << hlen << ". Header fields:" << std::endl;
 
   std::vector<std::string> tokens;
-  Tokenize(std::string(header2), tokens, ";");
+  Tokenize(std::string(header2.begin(), header2.end()), tokens, ";");
   
-  for (size_t i = 0; i < tokens.size()-1; ++i)
+  for (size_t i = 0; i < tokens.size(); ++i)
     std::cout << tokens[i] << std::endl;
 
-  if (tokens[tokens.size()-1][0] == 'S' && tokens[tokens.size()-1][1] == '=')
+  for (std::vector<std::string>::const_iterator it = tokens.begin(), end = tokens.end(); it != end; ++it)
   {
-    std::cout << std::endl << "Found player information, parsing..." << std::endl;
-    std::vector<std::string> subtokens;
-    Tokenize(tokens[tokens.size()-1].substr(2), subtokens, ":");
+    const std::string & token = *it;
 
-    for (size_t i = 0; i < subtokens.size(); ++i)
+    if (token[0] == 'S' && token[1] == '=')
     {
-      if (subtokens[i][0] != 'H') continue;
+      std::cout << std::endl << "Found player information, parsing..." << std::endl;
+      std::vector<std::string> subtokens;
+      Tokenize(token.substr(2), subtokens, ":");
 
-      std::vector<std::string> subsubtokens;
-      Tokenize(subtokens[i].substr(1), subsubtokens, ",");
-      playerNames2.push_back(subsubtokens);
+      for (size_t i = 0; i < subtokens.size(); ++i)
+      {
+        if (subtokens[i][0] != 'H') continue;
 
-      std::istringstream iss("0x" + std::string(subsubtokens[1]));
-      uint32_t v;
-      iss >> std::hex >> v;
+        std::vector<std::string> subsubtokens;
+        Tokenize(subtokens[i].substr(1), subsubtokens, ",");
+        playerNames2.push_back(subsubtokens);
 
-      fprintf(stdout, "Ingame player name: %s (Faction: %s, IP addr.: 0x%08X, %d.%d.%d.%d) Other data: \"",
-              subsubtokens[0].c_str(), faction(std::atoi(subsubtokens[5].c_str()), opts.gametype).c_str(), v,
-              v>>24, ((v<<8)>>24), ((v<<16)>>24), ((v<<24)>>24) );
-      for (size_t j = 2; j < subsubtokens.size()-1; ++j)
-        std::cout << subsubtokens[j] << ", ";
-      std::cout << subsubtokens[subsubtokens.size()-1] << "\"." << std::endl;
-      
+        std::istringstream iss("0x" + std::string(subsubtokens[1]));
+        uint32_t v;
+        iss >> std::hex >> v;
+
+        fprintf(stdout, "Ingame player name: %s (Faction: %s, IP addr.: 0x%08X, %d.%d.%d.%d) Other data: \"",
+                subsubtokens[0].c_str(), faction(std::atoi(subsubtokens[5].c_str()), opts.gametype).c_str(), v,
+                v>>24, ((v<<8)>>24), ((v<<16)>>24), ((v<<24)>>24) );
+        for (size_t j = 2; j < subsubtokens.size()-1; ++j)
+          std::cout << subsubtokens[j] << ", ";
+        std::cout << subsubtokens[subsubtokens.size()-1] << "\"." << std::endl;
+      }
     }
   }
 
@@ -916,9 +928,12 @@ bool parse_replay_file(const char * filename, Options & opts)
   myfile.read(reinterpret_cast<char*>(&datetime),  sizeof(datetime));
 
   myfile.read(reinterpret_cast<char*>(&dummy), 4);
-  char ch_vermagic[dummy];
-  myfile.read(ch_vermagic, dummy);
-  str_vermagic = std::string(ch_vermagic, dummy);
+
+  if (dummy > 10000) { throw std::length_error("Requested version magic length too big."); }
+
+  std::vector<char> ch_vermagic(dummy);
+  myfile.read(ch_vermagic.data(), dummy);
+  str_vermagic = std::string(ch_vermagic.begin(), ch_vermagic.end());
   myfile.read(reinterpret_cast<char*>(&after_vermagic), 4);
 
   // Skipping unknown data. We print all this later.
@@ -1029,6 +1044,8 @@ bool parse_replay_file(const char * filename, Options & opts)
     myfile.read(&onebyte, 1);
     myfile.read(reinterpret_cast<char*>(&len), 4);
 
+    if (len > 10000) { throw std::length_error("Requested chunk length too big."); }
+
     if (myfile.eof() || filesize - myfile.tellg() < len + 4)
     {
       if (opts.autofix)
@@ -1049,9 +1066,10 @@ bool parse_replay_file(const char * filename, Options & opts)
       }
     }
 
-    unsigned char buf[len + 4];
+    std::vector<unsigned char> vbuf(len + 4);
     lastgood = int(myfile.tellg()) - 9;
-    myfile.read(reinterpret_cast<char*>(buf), len + 4);
+    myfile.read(reinterpret_cast<char*>(vbuf.data()), len + 4);
+    const unsigned char * const buf = vbuf.data();
 
     if (opts.printraw)
     {
@@ -1135,7 +1153,7 @@ bool parse_replay_file(const char * filename, Options & opts)
         {
           fprintf(stderr, "  writing audio chunk 0x%02X%02X (length: %2u bytes vs. %2u)...\n", buf[11], buf[12], READ_UINT16LE(buf[13], buf[14]), len-15);
           if(READ_UINT16LE(buf[13], buf[14]) != len-15) abort();
-          audioout.write(reinterpret_cast<char*>(buf) + 15, len - 15);
+          audioout.write(reinterpret_cast<const char*>(buf) + 15, len - 15);
         }
 
         if (opts.type != -1 && opts.type != 3) continue;
@@ -1327,7 +1345,21 @@ int main(int argc, char * argv[])
 
     for ( ; optind < argc; ++optind)
     {
-      const bool res = parse_replay_file(argv[optind], opts);
+      bool res;
+      try
+      {
+        res = parse_replay_file(argv[optind], opts);
+      }
+      catch (const std::exception & e)
+      {
+        std::cout << "Exception: " << e.what() << std::endl;
+        res = false;
+      }
+      catch (...)
+      {
+        std::cout << "Unknown Exception!" << std::endl;
+        res = false;
+      }
 
       if (!res && opts.breakonerror) return 1;
 
