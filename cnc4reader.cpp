@@ -3,6 +3,7 @@
 #include <sstream>
 #include <iomanip>
 #include <vector>
+#include <stdexcept>
 #include <cstdint>
 #include <cstring>
 #include <ctime>
@@ -223,6 +224,8 @@ int main(int argc, char * argv[])
   
   READ(infile, N);
 
+  if (N > 10000) { throw std::length_error("Requested header length too big."); }
+
   std::vector<char> header(N);
   infile.read(header.data(), N);
 
@@ -290,6 +293,9 @@ int main(int argc, char * argv[])
   READ(infile, datetime);
 
   READ(infile, N);
+
+  if (N > 10000) { throw std::length_error("Requested version length too big."); }
+
   std::vector<char> version(N);
 
   infile.read(version.data(), N);
@@ -364,6 +370,8 @@ int main(int argc, char * argv[])
     READ(infile, N);
     READ(infile, L);
     READ(infile, S);
+
+    if (S > 10000) { throw std::length_error("Requested chunk length too big."); }
 
     if (N == 0xFFFFFFFF && L == 0xFFFF) { std::cout << "Replay duration: " << timecode_to_string(Nlast) << std::endl; break; }
 
