@@ -187,23 +187,29 @@ typedef struct _apm_t
   unsigned int counter[4];
 } apm_t;
 
-typedef std::map<unsigned int, apm_t> apm_map_t;
+typedef std::map<unsigned int, unsigned int> apm_1_map_t;
+typedef std::map<unsigned int, apm_t>        apm_2_map_t;
 
 typedef std::map<unsigned int, int> command_map_t;
 
 command_map_t RA3_commands;
+command_map_t KW_commands;
+command_map_t TW_commands;
 
 void populate_command_map_RA3(command_map_t & ra3_commands);
+void populate_command_map_KW(command_map_t & kw_commands);
+void populate_command_map_TW(command_map_t & tw_commands);
 
 struct Options
 {
   enum GameType { GAME_UNDEF = 0, GAME_KW, GAME_TW, GAME_RA3 };
 
-  Options() : type(-1), fixpos(0), fixfn(NULL), audiofn(NULL),
+  Options() : type(-1), cmd_filter(-1), fixpos(0), fixfn(NULL), audiofn(NULL),
               autofix(false), breakonerror(false), dumpchunks(false), dumpaudio(false), filter_heartbeat(false), printraw(false),
               apm(false), fixbroken(false), gametype(GAME_UNDEF), verbose(false) {}
 
   int type;
+  int cmd_filter;
   unsigned int fixpos;
   const char * fixfn;
   const char * audiofn;
@@ -362,6 +368,28 @@ std::string read2ByteStringN(std::istream & in, size_t N)
   return s;
 }
 
+std::string read2ByteString(const char * in, size_t N)
+{
+  codepoint_t     ccp;
+  twobytestring_t cbuf;
+  std::string     s;
+
+  while (N > 1)
+  {
+    cbuf.byte1 = *in++; --N;
+    cbuf.byte2 = *in++; --N;
+
+    if (READ_UINT16LE(cbuf.byte1, cbuf.byte2) == 0)
+      break;
+
+    codepointToUTF8(READ_UINT16LE(cbuf.byte1, cbuf.byte2), &ccp);
+
+    s += std::string(ccp.c);
+  }
+
+  return s;
+}
+
 void Tokenize(const std::string & str, std::vector<std::string> & tokens, const std::string & delimiters = " ")
 {
   // Skip delimiters at beginning.
@@ -406,7 +434,7 @@ void hexdump(FILE * out, const unsigned char * buf, size_t length, const char * 
   }
 }
 
-bool array_is_zero(unsigned char * data, size_t n)
+bool array_is_zero(const unsigned char * data, size_t n)
 {
   for (size_t i = 0; i < n; ++i)
     if (data[i] != 0)
@@ -425,7 +453,7 @@ bool parse_options(int argc, char * argv[], Options & opts)
 {
   int opt;
 
-  while ((opt = getopt(argc, argv, "A:t:f:F:egaRckwrpHvh")) != -1)
+  while ((opt = getopt(argc, argv, "A:t:T:f:F:egaRckwrpHvh")) != -1)
   {
     switch (opt)
     {
@@ -451,6 +479,9 @@ bool parse_options(int argc, char * argv[], Options & opts)
       break;
     case 't':
       opts.type = atoi(optarg);
+      break;
+    case 'T':
+      opts.cmd_filter = std::strtol(optarg, NULL, 0);
       break;
     case 'c':
       opts.dumpchunks = true;
@@ -488,6 +519,8 @@ bool parse_options(int argc, char * argv[], Options & opts)
                 << "        -a:          dump audio data" << std::endl
                 << "        -A filename: filename for audio output" << std::endl
                 << "        -t type:     filter chunks of type 'type'; only effective with '-c' or '-r'" << std::endl
+                << "        -T cmd:      filter type-1 chunks with command number 'cmd'; only effective with '-c'" << std::endl
+                << "        -p:          gather APM statistics" << std::endl
                 << "        -w, -k, -r:  interpret as Tiberium Wars / Kane's Wrath / Red Alert 3 replay (otherwise treat as Kane's Wrath if unsure)" << std::endl
                 << "        -f pos:      attempt to fix the replay file from last good position pos" << std::endl
                 << "        -F name:     output filename for fixed replay file" << std::endl
@@ -505,6 +538,12 @@ bool parse_options(int argc, char * argv[], Options & opts)
     opts.printraw = true;
     opts.dumpchunks = true;
     opts.type = 0;
+  }
+
+  if (opts.apm)
+  {
+    opts.dumpchunks = true;
+    opts.cmd_filter = 0xFFFF;
   }
 
   return true;
@@ -604,7 +643,66 @@ void fix_replay_file(const char * filename, Options & opts)
     yourfile.write(reinterpret_cast<char*>(&time_code), 4);
     yourfile.write(FINALCC1B, 5);
   }
+}
 
+bool parse_chunk1_fixlen(const unsigned char * buf, size_t & pos, size_t opos, 
+                         unsigned int cmd_id, size_t counter,
+                         size_t cmd_len, const Options & opts)
+{
+  if (buf[opos + cmd_len - 1] == 0xFF)
+  {
+    if (opts.cmd_filter == -1 || opts.cmd_filter == int(cmd_id))
+    {
+      fprintf(stdout, " %2i: Command 0x%02X, fixed length %u.\n", counter, cmd_id, cmd_len);
+      hexdump(stdout, buf + opos, cmd_len, "     ");
+    }
+    pos += cmd_len;
+  }
+  else
+  {
+    fprintf(stdout,
+            "PANIC: fixed command length (%u) for command (0x%02X) does not lead to terminator, but to 0x%02X!\n",
+            cmd_len, cmd_id, buf[opos + cmd_len - 1]);
+    return false;
+  }
+  return true;
+}
+
+bool parse_chunk1_varlen(const unsigned char * buf, size_t & pos, size_t opos,
+                         unsigned int cmd_id, size_t counter, size_t len,
+                         size_t cmd_len_byte, const Options & opts)
+{
+  if (buf[pos + cmd_len_byte] == 0xFF)
+  {
+    pos += cmd_len_byte + 1;
+  }
+
+  else
+  {
+    size_t l = (buf[pos + cmd_len_byte] >> 4) + 1;
+    pos += 4 * l + 2 + cmd_len_byte;
+
+    while (l == 0x10 && pos + 4 < len && buf[pos - 1] != 0xFF)
+    {
+      l = ((buf[pos - 1] >> 4) + 1);
+      pos += 4 * l + 1;
+    }
+  }
+
+  if (opts.cmd_filter == -1 || opts.cmd_filter == int(cmd_id))
+  {
+    fprintf(stdout, " %2i: Command 0x%02X, variable length %u.\n", counter, cmd_id, pos - opos);
+  }
+
+  return true;
+}
+
+/* This helper function computes the player number 0, 1, 2, ... from
+ * the player number in the type-1 chunk commands, 0x19, 0x1A, etc.
+ */
+inline unsigned int mangle_player(unsigned int n)
+{
+  return n / 8 - 3;
 }
 
 bool parse_replay_file(const char * filename, Options & opts)
@@ -1021,8 +1119,10 @@ bool parse_replay_file(const char * filename, Options & opts)
     return true;
   }
 
-  apm_map_t player_apm;
+  apm_1_map_t player_1_apm;
+  apm_2_map_t player_2_apm;
   std::map<unsigned int, std::map<unsigned int, unsigned int> > type1_apm;
+
 
   if (myfile.tellg() != firstchunk)
   {
@@ -1030,8 +1130,15 @@ bool parse_replay_file(const char * filename, Options & opts)
     myfile.seekg(firstchunk, std::fstream::beg);
   }
 
-  std::cout << std::endl << "=================================================" << std::endl
-            << std::endl << "Now dumping individual data blocks." << std::endl << std::endl;
+  if (opts.apm)
+  {
+    std::cout << std::endl << "==== gathering APM statistics ====" << std::endl << std::endl;
+  }
+  else
+  {
+    std::cout << std::endl << "=================================================" << std::endl
+              << std::endl << "Now dumping individual data blocks." << std::endl << std::endl;
+  }
 
   for (int block_count = 0; !myfile.eof(); block_count++)
   {
@@ -1081,68 +1188,305 @@ bool parse_replay_file(const char * filename, Options & opts)
     }
     else if (opts.dumpchunks)
     {
+      const command_map_t & commands = opts.gametype == Options::GAME_TW ? TW_commands
+        : (opts.gametype == Options::GAME_KW ? KW_commands : RA3_commands);
+
       // Chunk type 1
       if (onebyte == 1 && buf[0] == 1 && buf[len-1] == 0xFF && READ_UINT32LE(buf+len) == 0)
       {
         if (opts.type != -1 && opts.type != 1) continue;
-        fprintf(stdout, "Chunk number 0x%08X (timecode: %s, count %u, length: %u): Type: %u. Number of commands: %u. Payload:\n",
-                dummy, timecode_to_string(dummy).c_str(), block_count, len, onebyte, READ_UINT32LE(buf+1));
 
+        const size_t ncommands = READ_UINT32LE(buf+1);
+
+        if (!opts.apm)
+        {
+          fprintf(stdout, "Chunk number 0x%08X (timecode: %s, count %u, length: %u): Type: %u. Number of commands: %u."
+                  //" Payload:"
+                  "\n  Dissecting chunk commands.\n",
+                  dummy, timecode_to_string(dummy).c_str(), block_count, len, onebyte, ncommands);
+        }
+
+        /* We've completed the dissector, no more need for the raw dump! */
         hexdump(stdout, buf+5, len-5, "  ");
 
-        //if (READ_UINT32LE(buf+1) == 1) fprintf(stdout, "MASTERPLAN 0x%02X %u\n", (int)buf[5], len-5);
+        /* This next line was used during the learning phase to gather command statistics. */
+        //if (ncommands == 1) fprintf(stdout, "MASTERPLAN 0x%02X %u\n", (int)buf[5], len-5);
 
-        std::cout << std::endl << "  Attempting to dissect chunk commands." << std::endl;
-        size_t pos = 5, opos = pos;
-        for (size_t counter = 1 ; ; counter++)
+        size_t pos = 5, opos = pos, counter;
+
+        for (counter = 1 ; ; counter++)
         {
           const unsigned int cmd_id = buf[opos];
-          command_map_t::const_iterator c;
-          if (opts.gametype == Options::GAME_RA3                    &&
-              (c = RA3_commands.find(cmd_id)) != RA3_commands.end() &&
-              c->second > 0                                            )
+          const unsigned int player_id = buf[opos + 1];
+
+          ++player_1_apm[mangle_player(player_id)];
+
+          command_map_t::const_iterator c = commands.find(cmd_id);
+
+          if (c != commands.end() && c->second > 0)  // Fixed-length commands
           {
-            if (buf[opos + c->second - 1] == 0xFF)
+            if (!parse_chunk1_fixlen(buf, pos, opos, cmd_id, counter, c->second, opts)) break;
+          }
+          else if (c != commands.end() && c->second <= 0) // variable-length commands
+          {
+            char s[10] = { ' ', ' ', ' ', ' ', ' ', 0 };
+            int cmd_len_byte = -c->second;
+
+            if (opts.gametype == Options::GAME_RA3)
             {
-              fprintf(stdout, " %2i: Command %02X, fixed length %u.\n", counter, cmd_id, c->second);
-              hexdump(stdout, buf + opos, c->second, "     ");
-              pos += c->second;
-              opos = pos;
-              if (pos == len) break;
+              if (cmd_len_byte > 0)
+              {
+                parse_chunk1_varlen(buf, pos, opos, cmd_id, counter, len, cmd_len_byte, opts);
+              }
+              else if (cmd_id == 0xF9)
+              {
+                parse_chunk1_varlen(buf, pos, opos, cmd_id, counter, len, 2, opts);
+              }
+              else if (cmd_id == 0xFF)
+              {
+                parse_chunk1_varlen(buf, pos, opos, cmd_id, counter, len, 34, opts);
+              }
+              else if (cmd_id == 0xF5 || cmd_id == 0xF6)
+              {
+                parse_chunk1_varlen(buf, pos, opos, cmd_id, counter, len, 5, opts);
+              }
+              else if (cmd_id == 0xFA)
+              {
+                parse_chunk1_varlen(buf, pos, opos, cmd_id, counter, len, 7, opts);
+              }
+              else if (cmd_id == 0xFE)
+              {
+                parse_chunk1_varlen(buf, pos, opos, cmd_id, counter, len, 15, opts);
+              }
+              else if (cmd_id == 0x0C)
+              {
+                size_t l = buf[pos + 3] + 1;
+                pos += 4 * l + 5;
+                if (opts.cmd_filter == -1 || opts.cmd_filter == int(cmd_id))
+                {
+                  fprintf(stdout, " %2i: Command 0x%02X, special length %u.\n", counter, cmd_id, pos - opos);
+                }
+              }
+              else if (cmd_id == 0x01)
+              {
+                if (buf[pos + 7] == 0xFF)
+                {
+                  pos += 8;
+                }
+                else
+                {
+                  const size_t l = buf[pos + 17] + 1;
+                  pos += 4 * l + 32;
+                }
+                if (opts.cmd_filter == -1 || opts.cmd_filter == int(cmd_id))
+                {
+                  fprintf(stdout, " %2i: Command 0x%02X, special length %u.\n", counter, cmd_id, pos - opos);
+                }
+              }
+              else if (cmd_id == 0x10) /* 0x10 is special, it has two possible lengths, 12 or 13 */
+              {
+                const size_t l = buf[pos + 2] == 0x14 ? 12 : (buf[pos + 2] == 0x04 ? 13 : 99999);
+
+                if (opts.cmd_filter == -1 || opts.cmd_filter == int(cmd_id))
+                  fprintf(stdout, " %2i: Command 0x%02X, special length %u.\n", counter, cmd_id, l);
+
+                pos += l;
+              }
+              else if (cmd_id == 0x4B) /* 0x4B is special, it has two possible lengths, 8 or 16 */
+              {
+                const size_t l = buf[pos + 2] == 0x04 ? 8 : (buf[pos + 2] == 0x07 ? 16 : 99999);
+
+                if (opts.cmd_filter == -1 || opts.cmd_filter == int(cmd_id))
+                  fprintf(stdout, " %2i: Command 0x%02X, special length %u.\n", counter, cmd_id, l);
+
+                pos += l;
+              }
+              else if (cmd_id == 0x33)
+              {
+                size_t l = buf[pos + 3];
+                std::string s1(buf + pos + 4, buf + pos + 4 + l);
+                fprintf(stdout, " %2i: Command 0x33: First string length %u, \"%s\".", counter, l, s1.c_str());
+                pos += l + 5;
+                l = buf[pos];
+                std::string s2 = read2ByteString((const char*)buf + pos + 1, 2 * l);
+                fprintf(stdout, " Second string length %u, \"%s\".", l, s2.c_str());
+                pos += 2 * l + 2;
+                fprintf(stdout, " Number: 0x%08X.\n", READ_UINT32LE(buf + pos));
+                pos += 5;
+              }
+              else
+              {
+                fprintf(stdout, "Warning: Unrecognized variable-length command.\n");
+
+                while (buf[pos] != 0xFF && pos < len) pos++;
+
+                if (buf[pos] != 0xFF) fprintf(stdout, "Panic: could not find terminator!\n");
+
+                pos++;
+                sprintf(s, " %2i: ", counter);
+              }
             }
-            else
+            else if (opts.gametype == Options::GAME_KW)
             {
-              fprintf(stdout, "PANIC: fixed command length (%u) does not lead to terminator!\n", c->second);
-              return false;
+              if (cmd_len_byte > 0)
+              {
+                parse_chunk1_varlen(buf, pos, opos, cmd_id, counter, len, cmd_len_byte, opts);
+              }
+              else if (cmd_id == 0xF5 || cmd_id == 0xF6)
+              {
+                parse_chunk1_varlen(buf, pos, opos, cmd_id, counter, len, 4, opts);
+              }
+              else if (cmd_id == 0xF9 || cmd_id == 0xFB || cmd_id == 0xFC)
+              {
+                parse_chunk1_varlen(buf, pos, opos, cmd_id, counter, len, 2, opts);
+              }
+              else if (cmd_id == 0x26)
+              {
+                parse_chunk1_varlen(buf, pos, opos, cmd_id, counter, len, 15, opts);
+              }
+              else if (cmd_id == 0x31)
+              {
+                size_t l = buf[pos + 12];
+                pos += l * 18 + 17;
+                if (opts.cmd_filter == -1 || opts.cmd_filter == int(cmd_id))
+                {
+                  fprintf(stdout, " %2i: Command 0x%02X, special length %u.\n", counter, cmd_id, pos - opos);
+                }
+              }
+              else if (cmd_id == 0x2D)
+              {
+                pos += buf[pos + 7] == 0xFF ? 8 : 26;
+
+                if (opts.cmd_filter == -1 || opts.cmd_filter == int(cmd_id))
+                {
+                  fprintf(stdout, " %2i: Command 0x%02X, special length %u.\n", counter, cmd_id, pos - opos);
+                }
+
+              }
+              else
+              {
+                fprintf(stdout, "Warning: Unrecognized variable-length command.\n");
+
+                while (buf[pos] != 0xFF && pos < len) pos++;
+
+                if (buf[pos] != 0xFF) fprintf(stdout, "Panic: could not find terminator!\n");
+
+                pos++;
+                sprintf(s, " %2i: ", counter);
+              }
+            }
+            else if (opts.gametype == Options::GAME_TW)
+            {
+              if (cmd_len_byte > 0)
+              {
+                parse_chunk1_varlen(buf, pos, opos, cmd_id, counter, len, cmd_len_byte, opts);
+              }
+              else if (cmd_id == 0xF5 || cmd_id == 0xF6)
+              {
+                parse_chunk1_varlen(buf, pos, opos, cmd_id, counter, len, 4, opts);
+              }
+              else if (cmd_id == 0x01 || cmd_id == 0x02 || cmd_id == 0x03 || cmd_id == 0x7D || cmd_id == 0x2D || cmd_id == 0xF9 ||
+                       cmd_id == 0xFA || cmd_id == 0xFB || cmd_id == 0xFC || cmd_id == 0xFD || cmd_id == 0xFE)
+              {
+                parse_chunk1_varlen(buf, pos, opos, cmd_id, counter, len, 2, opts);
+              }
+              else if (cmd_id == 0x01C)
+              {
+                parse_chunk1_varlen(buf, pos, opos, cmd_id, counter, len, 15, opts);
+              }
+              else if (cmd_id == 0x1D)
+              {
+                if (buf[pos + 30] == 0xFF)
+                {
+                  pos += 35;
+                }
+                else
+                {
+                  pos += 32 + 4 * (buf[pos + 30] + 1);
+                }
+                if (opts.cmd_filter == -1 || opts.cmd_filter == int(cmd_id))
+                {
+                  fprintf(stdout, " %2i: Command 0x%02X, special length %u.\n", counter, cmd_id, pos - opos);
+                }
+              }
+              else if (cmd_id == 0x27)
+              {
+                size_t l = buf[pos + 12];
+                pos += l * 18 + 17;
+                if (opts.cmd_filter == -1 || opts.cmd_filter == int(cmd_id))
+                {
+                  fprintf(stdout, " %2i: Command 0x%02X, special length %u.\n", counter, cmd_id, pos - opos);
+                }
+              }
+              else
+              {
+                fprintf(stdout, "Warning: Unrecognized variable-length command.\n");
+
+                while (buf[pos] != 0xFF && pos < len) pos++;
+
+                if (buf[pos] != 0xFF) fprintf(stdout, "Panic: could not find terminator!\n");
+
+                pos++;
+                sprintf(s, " %2i: ", counter);
+              }
+            }
+
+            if (opts.cmd_filter == -1 || opts.cmd_filter == int(cmd_id))
+            {
+              hexdump(stdout, buf + opos, pos - opos, s);
             }
           }
-          else
+          else if (c == commands.end()) // we are missing information!
           {
-            /* Variable-length commands are terminated by 0x00 0x00 0xFF ?? */
-            //while (!(buf[pos] == 0 && buf[pos+1] == 0 && buf[pos+2] == 0xFF) && pos+2 < len) pos++;
+            fprintf(stdout, "Warning: Unknown command type: 0x%02X\n", cmd_id);
+            break;
+          }
+          else // obsolete, this code just searches naively for an 0xFF "terminator"
+          {
             while (buf[pos] != 0xFF && pos < len) pos++;
-            if (buf[pos] != 0xFF) std::cout << "Panic: could not find terminator!" << std::endl;
+
+            if (buf[pos] != 0xFF) fprintf(stdout, "Panic: could not find terminator!\n");
+
+            char s[10] = { 0 };
             pos++;
-            char s[10];
             sprintf(s, " %2i: ", counter);
+
             hexdump(stdout, buf + opos, pos - opos, s);
-            opos = pos;
-            if (pos == len) break;
           }
+
+          opos = pos;
+          if (pos == len) break;
         }
-        fprintf(stdout, "\n");
+
+        if (!opts.apm) fprintf(stdout, "\n");
+
+        if (counter > ncommands) { fprintf(stdout, "Panic: Too many commands dissected!\n\n"); }
       }
 
       // Chunk type 2
       else if ((onebyte == 2 && buf[0] == 1 && buf[1] == 0 && READ_UINT32LE(buf+7) == dummy && READ_UINT32LE(buf+len) == 0) &&
                ((buf[6] == 0x0F && opts.gametype == Options::GAME_RA3) || buf[6] == 0x0E))
       {
+        const unsigned int player_id = READ_UINT32LE(buf + 2);
+
+        if (opts.apm)
+        {
+          player_2_apm[player_id].counter[0]++;
+          if (len == 40)      player_2_apm[player_id].counter[1]++;
+          else if (len == 24) player_2_apm[player_id].counter[2]++;
+          else                player_2_apm[player_id].counter[3]++;
+        }
+
         if (opts.type != -1 && opts.type != 2) continue;
         if (opts.type == 2 && opts.filter_heartbeat && dummy % 15 && dummy != 1) continue;
-        fprintf(stdout, "Chunk number 0x%08X (timecode: %s, count %u, length: %u): Type: %u. Number (Player ID?): %u. Payload:\n",
-                dummy, timecode_to_string(dummy).c_str(), block_count, len, onebyte, READ_UINT32LE(buf+2));
-        hexdump(stdout, buf+11, len-11, "  ");
-        fprintf(stdout, "\n");
+
+        if (!opts.apm)
+        {
+          fprintf(stdout, "Chunk number 0x%08X (timecode: %s, count %u, length: %u): Type: %u. Number (Player ID?): %u. Payload:\n",
+                  dummy, timecode_to_string(dummy).c_str(), block_count, len, onebyte, player_id);
+          hexdump(stdout, buf+11, len-11, "  ");
+          fprintf(stdout, "\n");
+        }
       }
 
       // Chunk type 3 (audio?)
@@ -1221,46 +1565,6 @@ bool parse_replay_file(const char * filename, Options & opts)
         return false;
       }
     }
-    else if (opts.apm)
-    {
-      // Chunk type 1
-      if (onebyte == 1 && buf[0] == 1 && buf[len-1] == 0xFF && READ_UINT32LE(buf+len) == 0)
-      {
-        fprintf(stdout, "Type 1\t%u\t%s\n", dummy, timecode_to_string(dummy).c_str());
-        if (READ_UINT32LE(buf+1) == 1)
-          type1_apm[buf[6]][buf[5]]++;
-        else
-        {
-          size_t pos = 5, opos = pos;
-          for (size_t counter = 1 ; ; counter++)
-          {
-            while ((buf[pos] != 0 || buf[pos+1] != 0 || buf[pos+2] != 0xFF) && pos < len) pos++;
-            if (pos == len) break;
-            else
-            {
-              type1_apm[buf[opos+1]][buf[opos]]++;
-              pos += 3;
-              opos = pos;
-            }
-          }
-        }
-      }
-
-      // Only dumping chunk type 2
-      if ((onebyte == 2 && buf[0] == 1 && buf[1] == 0 && READ_UINT32LE(buf+7) == dummy && READ_UINT32LE(buf+len) == 0) &&
-          ((buf[6] == 0x0F && opts.gametype == Options::GAME_RA3) || buf[6] == 0x0E))
-      {
-        unsigned int player_id = READ_UINT32LE(buf+2);
-
-        player_apm[player_id].counter[0]++;
-        if (len == 40)      player_apm[player_id].counter[1]++;
-        else if (len == 24) player_apm[player_id].counter[2]++;
-        else                player_apm[player_id].counter[3]++;
-
-        fprintf(stdout, "%u\t%u\t%s\n", player_id, dummy, timecode_to_string(dummy).c_str());
-        //fprintf(stdout, "Timecode: 0x%08X (%s). Player ID: %u\n", dummy, timecode_to_string(dummy).c_str(), player_id);
-      }
-    }
 
   } // for(...)
 
@@ -1281,31 +1585,10 @@ bool parse_replay_file(const char * filename, Options & opts)
     exit(1);
   }
 
-  myfile.read(reinterpret_cast<char*>(&dummy), 4);
-  fprintf(stdout, "Footer magic string as expected.\nFooter chunk number: 0x%08X (timecode: %s).\n", dummy, timecode_to_string(dummy).c_str());
-
-  if (opts.apm)
-  {
-    for (apm_map_t::const_iterator i = player_apm.begin() ; i != player_apm.end(); i++)
-      fprintf(stdout,
-              "Player %u. Total: %u actions (%.1f apm). Len40: %u (%.1f). Len24: %u (%.1f). Other: %u (%.1f).\n",
-              i->first,
-              i->second.counter[0], (double)(i->second.counter[0])*15.0*60.0/(double)(dummy),
-              i->second.counter[1], (double)(i->second.counter[1])*15.0*60.0/(double)(dummy),
-              i->second.counter[2], (double)(i->second.counter[2])*15.0*60.0/(double)(dummy),
-              i->second.counter[3], (double)(i->second.counter[3])*15.0*60.0/(double)(dummy)    );
-
-    for (std::map<unsigned int, std::map<unsigned int, unsigned int> >::const_iterator i = type1_apm.begin() ; i != type1_apm.end(); i++)
-    {
-      fprintf(stdout, "Player 0x%02X:", i->first);
-      for (std::map<unsigned int, unsigned int>::const_iterator j = i->second.begin(); j != i->second.end(); j++)
-      {
-        if (j != i->second.begin()) fprintf(stdout, ",");
-        fprintf(stdout, " 0x%02X: %u (%.1f)", j->first, j->second, (double)(j->second)*15.0*60.0/(double)(dummy));
-      }
-      fprintf(stdout, "\n");
-    }
-  }
+  uint32_t final_timecode;
+  myfile.read(reinterpret_cast<char*>(&final_timecode), 4);
+  fprintf(stdout, "Footer magic string as expected.\nFooter chunk number: 0x%08X (timecode: %s).\n",
+          final_timecode, timecode_to_string(final_timecode).c_str());
 
   myfile.read(dummy3, 2);
   if (opts.gametype == Options::GAME_RA3)
@@ -1321,6 +1604,27 @@ bool parse_replay_file(const char * filename, Options & opts)
     myfile.read(reinterpret_cast<char*>(&dummy), 4);
     myfile.read(reinterpret_cast<char*>(&hlen), 4);
     fprintf(stdout, "Numbers in the footer: %u %u %u %u.\n", dummy3[0], dummy3[1], dummy, hlen);
+  }
+
+  /* Report APM stats */
+  if (opts.apm)
+  {
+    fprintf(stdout, "\nAPM statistics: Type-2 Chunks\n");
+    for (apm_2_map_t::const_iterator i = player_2_apm.begin(), end = player_2_apm.end(); i != end; ++i)
+      fprintf(stdout,
+              "Player %u. Total: %u actions (%.1f apm). Len40: %u (%.1f). Len24: %u (%.1f). Other: %u (%.1f).\n",
+              i->first,
+              i->second.counter[0], (double)(i->second.counter[0])*15.0*60.0/(double)(final_timecode),
+              i->second.counter[1], (double)(i->second.counter[1])*15.0*60.0/(double)(final_timecode),
+              i->second.counter[2], (double)(i->second.counter[2])*15.0*60.0/(double)(final_timecode),
+              i->second.counter[3], (double)(i->second.counter[3])*15.0*60.0/(double)(final_timecode)
+              );
+
+    fprintf(stdout, "\nAPM statistics: Type-1 Chunks\n");
+    for (apm_1_map_t::const_iterator i = player_1_apm.begin(), end = player_1_apm.end() ; i != end; ++i)
+    {
+      fprintf(stdout, "Player %u: %u\n", i->first, i->second);
+    }
   }
 
   return true;
@@ -1342,6 +1646,8 @@ int main(int argc, char * argv[])
   else
   {
     populate_command_map_RA3(RA3_commands);
+    populate_command_map_KW(KW_commands);
+    populate_command_map_TW(TW_commands);
 
     for ( ; optind < argc; ++optind)
     {
@@ -1370,10 +1676,123 @@ int main(int argc, char * argv[])
   return 0;
 }
 
+/* The type-1 chunk command info.
+ * Commands are either of fixed length (> 0), or of variable length.
+ * Variable lengths commands that receive special treatment are set to 0,
+ * while those that can be treated with parse_chunk1_varlen are set to -cmd_len_byte.
+ */
+
+void populate_command_map_TW(command_map_t & tw_commands)
+{
+  tw_commands[0x04] = 3;
+  tw_commands[0x05] = 3;
+  tw_commands[0x06] = 3;
+  tw_commands[0x07] = 3;
+  tw_commands[0x08] = 3;
+  tw_commands[0x0C] = 3;
+  tw_commands[0x0D] = 3;
+  tw_commands[0x1E] = 35;
+  tw_commands[0x1F] = 28;
+  tw_commands[0x21] = 12;
+  tw_commands[0x23] = 26;
+  tw_commands[0x24] = 22;
+  tw_commands[0x25] = 17;
+  tw_commands[0x26] = 17;
+  tw_commands[0x2A] = 8;
+  tw_commands[0x32] = 21;
+  tw_commands[0x34] = 16;
+  tw_commands[0x39] = 12;
+  tw_commands[0x3A] = 8;
+  tw_commands[0x3B] = 21;
+  tw_commands[0x3C] = 16;
+  tw_commands[0x3D] = 16;
+  tw_commands[0x42] = 3;
+  tw_commands[0x43] = 3;
+  tw_commands[0x57] = 20;
+  tw_commands[0x68] = 8;
+  tw_commands[0x6D] = 3;
+  tw_commands[0x70] = 29;
+  tw_commands[0x74] = 8;
+  tw_commands[0x75] = 12;
+  tw_commands[0x7F] = 8;
+  tw_commands[0x82] = 45;
+  tw_commands[0x83] = 1049;
+  tw_commands[0x84] = 16;
+  tw_commands[0x85] = 40;
+  tw_commands[0x86] = 16;
+  tw_commands[0x87] = 10;
+  tw_commands[0xF8] = 5;
+
+  tw_commands[0x01] = -2;
+  tw_commands[0x02] = -2;
+  tw_commands[0x03] = -2;
+  tw_commands[0x1C] = 0;
+  tw_commands[0x1D] = 0;
+  tw_commands[0x2D] = 0;
+  tw_commands[0x27] = 0;
+  tw_commands[0x7D] = 0;
+  tw_commands[0xF5] = 0;
+  tw_commands[0xF6] = 0;
+  tw_commands[0xF9] = 0;
+  tw_commands[0xFA] = 0;
+  tw_commands[0xFB] = 0;
+  tw_commands[0xFC] = 0;
+  tw_commands[0xFD] = 0;
+  tw_commands[0xFE] = 0;
+}
+
+void populate_command_map_KW(command_map_t & kw_commands)
+{
+  kw_commands[0x05] = 3;
+  kw_commands[0x06] = 3;
+  kw_commands[0x07] = 3;
+  kw_commands[0x27] = 40;
+  kw_commands[0x29] = 28;
+  kw_commands[0x2B] = 17;
+  kw_commands[0x2E] = 22;
+  kw_commands[0x2F] = 17;
+  kw_commands[0x30] = 17;
+  kw_commands[0x34] = 8;
+  kw_commands[0x35] = 12;
+  kw_commands[0x36] = 13;
+  kw_commands[0x3C] = 21;
+  kw_commands[0x3E] = 16;
+  kw_commands[0x3D] = 21;
+  kw_commands[0x43] = 12;
+  kw_commands[0x44] = 8;
+  kw_commands[0x45] = 21;
+  kw_commands[0x46] = 16;
+  kw_commands[0x47] = 16;
+  kw_commands[0x4C] = 3;
+  kw_commands[0x61] = 20;
+  kw_commands[0x72] = 8;
+  kw_commands[0x77] = 3;
+  kw_commands[0x7A] = 29;
+  kw_commands[0x7E] = 12;
+  kw_commands[0x7F] = 12;
+  kw_commands[0x87] = 8;
+  kw_commands[0x89] = 8;
+  kw_commands[0x8C] = 45;
+  kw_commands[0x8D] = 1049;
+  kw_commands[0x8E] = 16;
+  kw_commands[0x8F] = 40;
+  kw_commands[0x92] = 8;
+  kw_commands[0xF8] = 5;
+  kw_commands[0xFD] = 8;
+
+  kw_commands[0x26] = 0;
+  kw_commands[0x2D] = 0;
+  kw_commands[0x31] = 0;
+  kw_commands[0xF5] = 0;
+  kw_commands[0xF6] = 0;
+  kw_commands[0xF9] = 0;
+  kw_commands[0xFB] = 0;
+  kw_commands[0xFC] = 0;
+}
+
 void populate_command_map_RA3(command_map_t & ra3_commands)
 {
   ra3_commands[0x00] = 45;
-  ra3_commands[0x01] = 0;
   ra3_commands[0x02] = 32;
   ra3_commands[0x03] = 17;
   ra3_commands[0x04] = 17;
@@ -1383,11 +1802,9 @@ void populate_command_map_RA3(command_map_t & ra3_commands)
   ra3_commands[0x08] = 17;
   ra3_commands[0x09] = 35;
   ra3_commands[0x0A] = 8;
-  ra3_commands[0x0C] = 0;
   ra3_commands[0x0D] = 8;
   ra3_commands[0x0E] = 8;
   ra3_commands[0x0F] = 16;
-  ra3_commands[0x10] = 0;
   ra3_commands[0x12] = 8;
   ra3_commands[0x14] = 16;
   ra3_commands[0x15] = 16;
@@ -1402,26 +1819,31 @@ void populate_command_map_RA3(command_map_t & ra3_commands)
   ra3_commands[0x2E] = 12;
   ra3_commands[0x2F] = 12;
   ra3_commands[0x32] = 53;
-  ra3_commands[0x33] = 0;
-  ra3_commands[0x34] = 0;
+  ra3_commands[0x34] = 45;
   ra3_commands[0x35] = 1049;
   ra3_commands[0x36] = 16;
   ra3_commands[0x37] = 56;
   ra3_commands[0x47] = 8;
   ra3_commands[0x48] = 8;
-  ra3_commands[0x4B] = 0;
   ra3_commands[0x4C] = 8;
-  ra3_commands[0x4D] = 0;
   ra3_commands[0x4E] = 8;
+  ra3_commands[0x52] = 8;
   ra3_commands[0x5F] = 11;
-  ra3_commands[0xF5] = 0;
-  ra3_commands[0xF6] = 0;
   ra3_commands[0xF8] = 5;
-  ra3_commands[0xF9] = 0;
-  ra3_commands[0xFA] = 0;
   ra3_commands[0xFB] = 8;
   ra3_commands[0xFC] = 8;
   ra3_commands[0xFD] = 13;
+
+  ra3_commands[0x01] = 0;
+  ra3_commands[0x0C] = 0;
+  ra3_commands[0x10] = 0;
+  ra3_commands[0x33] = 0;
+  ra3_commands[0x4B] = 0;
+  ra3_commands[0x4D] = 0;
+  ra3_commands[0xF5] = 0;
+  ra3_commands[0xF6] = 0;
+  ra3_commands[0xF9] = 0;
+  ra3_commands[0xFA] = 0;
   ra3_commands[0xFE] = 0;
   ra3_commands[0xFF] = 0;
 }
