@@ -1,12 +1,4 @@
-#include <iostream>
-#include <fstream>
-#include <sstream>
-#include <iomanip>
-#include <vector>
-#include <stdexcept>
-#include <cstdint>
-#include <cstring>
-#include <ctime>
+#include "replayreader.h"
 
 /* g++ -O4 -s -o cnc4replayreader.exe cnc4reader.cpp -enable-auto-import -static-libgcc -static-libstdc++ -fwhole-program -std=gnu++0x */
 
@@ -36,161 +28,6 @@
 
    The "number" appears to be one of 31, 35 and 47, and always 47 for the heartbeat.
 */
-
-
-#define READ(f, x) do { f.read(reinterpret_cast<char*>(&x), sizeof(x)); } while (false)
-#define READ_UINT16LE(a, b)  ( ((unsigned int)(b)<<8) | ((unsigned int)(a)) )
-
-std::string timecode_to_string(unsigned int tc)
-{
-  std::ostringstream os;
-  os << tc/15/60 << ":" << std::setw(2) << std::setfill('0') << (tc/15)%60 << "::" << std::setw(2) << std::setfill('0') << tc%15;
-  return os.str();
-}
-
-void Tokenize(const std::string & str, std::vector<std::string> & tokens, const std::string & delimiters = " ")
-{
-  // Skip delimiters at beginning.
-  std::string::size_type lastPos = str.find_first_not_of(delimiters, 0);
-  // Find first "non-delimiter".
-  std::string::size_type pos     = str.find_first_of(delimiters, lastPos);
-
-  while (std::string::npos != pos || std::string::npos != lastPos)
-  {
-    // Found a token, add it to the vector.
-    tokens.push_back(str.substr(lastPos, pos - lastPos));
-    // Skip delimiters.  Note the "not_of"
-    lastPos = str.find_first_not_of(delimiters, pos);
-    // Find next "non-delimiter"
-    pos = str.find_first_of(delimiters, lastPos);
-  }
-}
-
-const char * WEEKDAYS[] = { "Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "[ERROR]" };
-char WEEKDAY_ERROR[8];
-
-typedef struct _date_text_t
-{
-  uint16_t data[8];
-} date_text_t;
-
-typedef struct _twobytestring_t
-{
-  unsigned char byte1;
-  unsigned char byte2;
-} twobytestring_t;
-
-typedef union _codepoint_t
-{
-  char c[4];
-  unsigned char u[4];
-  unsigned int i;
-} codepoint_t;
-
-const char * weekday(unsigned int d)
-{
-  if (d > 6) { sprintf(WEEKDAY_ERROR, "[%hu]", d); return WEEKDAY_ERROR; }
-  return WEEKDAYS[d];
-}
-
-void codepointToUTF8(unsigned int cp, codepoint_t * szOut)
-{
-  size_t len = 0;
-
-  szOut->u[0] = szOut->u[1] = szOut->u[2] = szOut->u[3] = 0;
-
-  if (cp < 0x0080) len++;
-  else if (cp < 0x0800) len += 2;
-  else len += 3;
-
-  int i = 0;
-  if (cp < 0x0080)
-    szOut->u[i++] = (unsigned char) cp;
-  else if (cp < 0x0800)
-  {
-    szOut->u[i++] = 0xc0 | (( cp ) >> 6 );
-    szOut->u[i++] = 0x80 | (( cp ) & 0x3F );
-  }
-  else
-  {
-    szOut->u[i++] = 0xE0 | (( cp ) >> 12 );
-    szOut->u[i++] = 0x80 | (( ( cp ) >> 6 ) & 0x3F );
-    szOut->u[i++] = 0x80 | (( cp ) & 0x3F );
-  }
-}
-
-bool array_is_zero(const unsigned char * data, size_t n)
-{
-  for (size_t i = 0; i < n; ++i)
-    if (data[i] != 0)
-      return false;
-  return true;
-}
-
-std::string read2ByteStringN(std::istream & in, size_t N)
-{
-  codepoint_t     ccp;
-  twobytestring_t cbuf;
-  std::string     s;
-  size_t          n = N;
-
-  while (n--)
-  {
-    in.read(reinterpret_cast<char*>(&cbuf), sizeof(twobytestring_t));
-    codepointToUTF8(cbuf.byte1 + (cbuf.byte2 << 8), &ccp);
-    s += std::string(ccp.c);
-  }
-
-  return s;
-}
-
-std::string read2ByteString(const char * in, size_t N)
-{
-  codepoint_t     ccp;
-  twobytestring_t cbuf;
-  std::string     s;
-
-  while (N > 1)
-  {
-    cbuf.byte1 = *in++; --N;
-    cbuf.byte2 = *in++; --N;
-
-    if (READ_UINT16LE(cbuf.byte1, cbuf.byte2) == 0)
-      break;
-
-    codepointToUTF8(READ_UINT16LE(cbuf.byte1, cbuf.byte2), &ccp);
-
-    s += std::string(ccp.c);
-  }
-
-  return s;
-}
-
-void asciiprint(FILE * out, unsigned char c)
-{
-  if (c < 32 || c > 127) fprintf(out, ".");
-  else fprintf(out, "%c", c);
-}
-
-void hexdump(FILE * out, const unsigned char * buf, size_t length, const char * delim)
-{
-  for (size_t k = 0; 16*k < length; k++)
-  {
-    fprintf(out, "%s", delim);
-
-    for (int i = 0; i < 16 && 16*k + i < length; ++i)
-      fprintf(out, "0x%02X ", buf[16*k + i]);
-
-    if (16*(k+1) > length) for (size_t i = 0; i < 16*(k+1)-length; ++i) fprintf(out, "     ");
-
-    fprintf(out, "    ");
-
-    for (size_t i = 0; i < 16 && 16*k + i < length; ++i)
-      asciiprint(out, buf[16*k + i]);
-
-    fprintf(out, "\n");
-  }
-}
 
 int main(int argc, char * argv[])
 {
@@ -229,8 +66,7 @@ int main(int argc, char * argv[])
   std::vector<char> header(N);
   infile.read(header.data(), N);
 
-  std::vector<std::string> tokens;
-  Tokenize(std::string(header.begin(), header.end()), tokens, ";");
+  std::vector<std::string> tokens = tokenize(std::string(header.begin(), header.end()), ";");
 
   for (size_t i = 0; i < tokens.size(); ++i)
   {
@@ -245,15 +81,13 @@ int main(int argc, char * argv[])
     if (token[0] == 'S' && token[1] == '=')
     {
       std::cout << std::endl << "Found player information, parsing..." << std::endl;
-      std::vector<std::string> subtokens;
-      Tokenize(token.substr(2), subtokens, ":");
+      std::vector<std::string> subtokens = tokenize(token.substr(2), ":");
 
       for (size_t i = 0; i < subtokens.size(); ++i)
       {
         if (subtokens[i][0] != 'H') continue;
 
-        std::vector<std::string> subsubtokens;
-        Tokenize(subtokens[i].substr(1), subsubtokens, ",");
+        std::vector<std::string> subsubtokens = tokenize(subtokens[i].substr(1), ",");
 
         player_names.push_back(subsubtokens[0]);
 
