@@ -142,7 +142,7 @@ std::vector<std::string> tokenize(const std::string & str, const std::string & d
 
 void asciiprint(FILE * out, unsigned char c)
 {
-  if (c < 32 || c > 127) fprintf(out, ".");
+  if (c < 32 || c > 126) fprintf(out, ".");
   else fprintf(out, "%c", c);
 }
 
