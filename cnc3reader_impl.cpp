@@ -499,5 +499,371 @@ void populate_command_map_RA3(command_map_t & ra3_commands, command_names_t & ra
   ra3_commands[0xFE] = -15;
   ra3_commands[0xFF] = -34;
 
+  ra3_cmd_names[0x37] = "scroll";
   ra3_cmd_names[0xFA] = "create group";
+  ra3_cmd_names[0xFB] = "select group";
+}
+
+/* This helper function computes the player number 0, 1, 2, ... from
+ * the player number in the type-1 chunk commands, 0x19, 0x1A, etc.
+ */
+inline unsigned int mangle_player(unsigned int n, Options::GameType gametype)
+{
+  return n / 8 - (gametype == Options::GAME_RA3 ? 2 : 3);
+}
+
+bool dumpchunks(const unsigned char * buf, char chunktype, unsigned int chunklen, unsigned int timecode,
+                unsigned char hsix, unsigned char hnumber1, std::ostream & audioout,
+                apm_1_map_t & player_1_apm, apm_2_map_t & player_2_apm,
+                apm_histo_map_t & player_indi_histo_apm, apm_histo_map_t & player_coal_histo_apm,
+                unsigned int block_count, Options::GameType gametype, const Options & opts)
+{
+      const command_map_t & commands = gametype == Options::GAME_TW ? TW_commands
+        : (gametype == Options::GAME_KW ? KW_commands : RA3_commands);
+
+      // Chunk type 1
+      if (chunktype == 1 && buf[0] == 1 && buf[chunklen-1] == 0xFF && READ_UINT32LE(buf+chunklen) == 0)
+      {
+        if (opts.type != -1 && opts.type != 1) return true;
+
+        const size_t ncommands = READ_UINT32LE(buf+1);
+
+        if (!opts.apm)
+        {
+          fprintf(stdout, "Chunk number 0x%08X (timecode: %s, count %u, length: %u): Type: %u. Number of commands: %u."
+                  //" Payload:"
+                  "\n  Dissecting chunk commands.\n",
+                  timecode, timecode_to_string(timecode).c_str(), block_count, chunklen, chunktype, ncommands);
+        }
+
+        /* We've completed the dissector, no more need for the raw dump! */
+        if (opts.dumpchunkswithraw)
+          hexdump(stdout, buf+5, chunklen-5, "  ");
+
+        /* This next line was used during the learning phase to gather command statistics. */
+        //if (ncommands == 1) fprintf(stdout, "MASTERPLAN 0x%02X %u\n", (int)buf[5], chunklen-5);
+
+        size_t pos = 5, opos = pos, counter;
+
+        for (counter = 1 ; ; counter++)
+        {
+          const unsigned int cmd_id = buf[opos];
+          const unsigned int player_id = buf[opos + 1];
+
+          ++player_indi_histo_apm[player_id][cmd_id];
+          ++player_coal_histo_apm[mangle_player(player_id, gametype)][cmd_id];
+          ++player_1_apm[mangle_player(player_id, gametype)];
+
+          command_map_t::const_iterator c = commands.find(cmd_id);
+
+          if      (c != commands.end() && c->second > 0)  // Fixed-length commands
+          {
+            if (!parse_chunk1_fixlen(buf, pos, opos, cmd_id, counter, c->second, opts)) break;
+          }
+          else if (c != commands.end() && c->second < 0)  // variable-length commands
+          {
+            if (!parse_chunk1_varlen(buf, pos, cmd_id, counter, chunklen, -c->second, opts)) break;
+          }
+          else if (c != commands.end() && c->second <= 0) // special-length commands
+          {
+            char s[10] = { ' ', ' ', ' ', ' ', ' ', 0 };
+
+            if (gametype == Options::GAME_RA3)
+            {
+              if (cmd_id == 0x0C)
+              {
+                size_t l = buf[pos + 3] + 1;
+                pos += 4 * l + 5;
+                if (opts.cmd_filter == -1 || opts.cmd_filter == int(cmd_id))
+                {
+                  fprintf(stdout, " %2i: Command 0x%02X, special length %u.\n", counter, cmd_id, pos - opos);
+                }
+              }
+              else if (cmd_id == 0x01)
+              {
+                if (buf[pos + 2] == 0xFF)
+                {
+                  pos += 3;
+                }
+                else if (buf[pos + 7] == 0xFF)
+                {
+                  pos += 8;
+                }
+                else
+                {
+                  const size_t l = buf[pos + 17] + 1;
+                  pos += 4 * l + 32;
+                }
+                if (opts.cmd_filter == -1 || opts.cmd_filter == int(cmd_id))
+                {
+                  fprintf(stdout, " %2i: Command 0x%02X, special length %u.\n", counter, cmd_id, pos - opos);
+                }
+              }
+              else if (cmd_id == 0x02)
+              {
+                if (buf[pos + 20] == 0x02)
+                {
+                  pos += 28;
+                }
+                else
+                {
+                  pos += 32;
+                }
+                if (opts.cmd_filter == -1 || opts.cmd_filter == int(cmd_id))
+                {
+                  fprintf(stdout, " %2i: Command 0x%02X, special length %u.\n", counter, cmd_id, pos - opos);
+                }
+              }
+              else if (cmd_id == 0x10) /* 0x10 is special, it has two possible lengths, 12 or 13 */
+              {
+                const size_t l = buf[pos + 2] == 0x14 ? 12 : (buf[pos + 2] == 0x04 ? 13 : 99999);
+
+                if (opts.cmd_filter == -1 || opts.cmd_filter == int(cmd_id))
+                  fprintf(stdout, " %2i: Command 0x%02X, special length %u.\n", counter, cmd_id, l);
+
+                pos += l;
+              }
+              else if (cmd_id == 0x4B) /* 0x4B is special, it has two possible lengths, 8 or 16 */
+              {
+                const size_t l = buf[pos + 2] == 0x04 ? 8 : (buf[pos + 2] == 0x07 ? 16 : 99999);
+
+                if (opts.cmd_filter == -1 || opts.cmd_filter == int(cmd_id))
+                  fprintf(stdout, " %2i: Command 0x%02X, special length %u.\n", counter, cmd_id, l);
+
+                pos += l;
+              }
+              else if (cmd_id == 0x33)
+              {
+                size_t l = buf[pos + 3];
+                std::string s1(buf + pos + 4, buf + pos + 4 + l);
+                fprintf(stdout, " %2i: Command 0x33: First string length %u, \"%s\".", counter, l, s1.c_str());
+                pos += l + 5;
+                l = buf[pos];
+                std::string s2 = read2ByteString((const char*)buf + pos + 1, 2 * l);
+                fprintf(stdout, " Second string length %u, \"%s\".", l, s2.c_str());
+                pos += 2 * l + 2;
+                fprintf(stdout, " Number: 0x%08X.\n", READ_UINT32LE(buf + pos));
+                pos += 5;
+              }
+              else
+              {
+                fprintf(stdout, "Warning: Unrecognized variable-length command.\n");
+                while (buf[pos] != 0xFF && pos < chunklen) pos++;
+                if (buf[pos] != 0xFF) fprintf(stdout, "Panic: could not find terminator!\n");
+                pos++;
+                sprintf(s, " %2i: ", counter);
+              }
+            }
+            else if (gametype == Options::GAME_KW)
+            {
+              if (cmd_id == 0xF5 || cmd_id == 0xF6)
+              {
+                parse_chunk1_varlen(buf, pos, cmd_id, counter, chunklen, 4, opts);
+              }
+              else if (cmd_id == 0xF9 || cmd_id == 0xFB || cmd_id == 0xFC)
+              {
+                parse_chunk1_varlen(buf, pos, cmd_id, counter, chunklen, 2, opts);
+              }
+              else if (cmd_id == 0x26)
+              {
+                parse_chunk1_varlen(buf, pos, cmd_id, counter, chunklen, 15, opts);
+              }
+              else if (cmd_id == 0x31)
+              {
+                size_t l = buf[pos + 12];
+                pos += l * 18 + 17;
+                if (opts.cmd_filter == -1 || opts.cmd_filter == int(cmd_id))
+                {
+                  fprintf(stdout, " %2i: Command 0x%02X, special length %u.\n", counter, cmd_id, pos - opos);
+                }
+              }
+              else if (cmd_id == 0x2D)
+              {
+                pos += buf[pos + 7] == 0xFF ? 8 : 26;
+
+                if (opts.cmd_filter == -1 || opts.cmd_filter == int(cmd_id))
+                {
+                  fprintf(stdout, " %2i: Command 0x%02X, special length %u.\n", counter, cmd_id, pos - opos);
+                }
+
+              }
+              else
+              {
+                fprintf(stdout, "Warning: Unrecognized variable-length command.\n");
+                while (buf[pos] != 0xFF && pos < chunklen) pos++;
+                if (buf[pos] != 0xFF) fprintf(stdout, "Panic: could not find terminator!\n");
+                pos++;
+                sprintf(s, " %2i: ", counter);
+              }
+            }
+            else if (gametype == Options::GAME_TW)
+            {
+              if (cmd_id == 0x1D)
+              {
+                if (buf[pos + 30] == 0xFF)
+                {
+                  pos += 35;
+                }
+                else
+                {
+                  pos += 32 + 4 * (buf[pos + 30] + 1);
+                }
+                if (opts.cmd_filter == -1 || opts.cmd_filter == int(cmd_id))
+                {
+                  fprintf(stdout, " %2i: Command 0x%02X, special length %u.\n", counter, cmd_id, pos - opos);
+                }
+              }
+              else if (cmd_id == 0x27)
+              {
+                size_t l = buf[pos + 12];
+                pos += l * 18 + 17;
+                if (opts.cmd_filter == -1 || opts.cmd_filter == int(cmd_id))
+                {
+                  fprintf(stdout, " %2i: Command 0x%02X, special length %u.\n", counter, cmd_id, pos - opos);
+                }
+              }
+              else
+              {
+                fprintf(stdout, "Warning: Unrecognized variable-length command.\n");
+                while (buf[pos] != 0xFF && pos < chunklen) pos++;
+                if (buf[pos] != 0xFF) fprintf(stdout, "Panic: could not find terminator!\n");
+                pos++;
+                sprintf(s, " %2i: ", counter);
+              }
+            }
+
+            if (opts.cmd_filter == -1 || opts.cmd_filter == int(cmd_id))
+            {
+              hexdump(stdout, buf + opos, pos - opos, s);
+            }
+          }
+          else if (c == commands.end()) // we are missing information!
+          {
+            fprintf(stdout, "Warning: Unknown command type: 0x%02X\n", cmd_id);
+            break;
+          }
+          else // obsolete, this code just searches naively for an 0xFF "terminator"
+          {
+            while (buf[pos] != 0xFF && pos < chunklen) pos++;
+
+            if (buf[pos] != 0xFF) fprintf(stdout, "Panic: could not find terminator!\n");
+
+            char s[10] = { 0 };
+            pos++;
+            sprintf(s, " %2i: ", counter);
+
+            hexdump(stdout, buf + opos, pos - opos, s);
+          }
+
+          opos = pos;
+          if (pos == chunklen) break;
+        }
+
+        if (!opts.apm) fprintf(stdout, "\n");
+
+        if (counter > ncommands) { fprintf(stdout, "Panic: Too many commands dissected!\n\n"); }
+      }
+
+      // Chunk type 2
+      else if ((chunktype == 2 && buf[0] == 1 && buf[1] == 0 && READ_UINT32LE(buf+7) == timecode && READ_UINT32LE(buf+chunklen) == 0) &&
+               ((buf[6] == 0x0F && gametype == Options::GAME_RA3) || buf[6] == 0x0E))
+      {
+        const unsigned int player_id = READ_UINT32LE(buf + 2);
+
+        if (opts.apm)
+        {
+          player_2_apm[player_id].counter[0]++;
+          if (chunklen == 40)      player_2_apm[player_id].counter[1]++;
+          else if (chunklen == 24) player_2_apm[player_id].counter[2]++;
+          else                     player_2_apm[player_id].counter[3]++;
+        }
+
+        if (opts.type != -1 && opts.type != 2) return true;
+        if (opts.type == 2 && opts.filter_heartbeat && timecode % 15 && timecode != 1) return true;
+
+        if (!opts.apm)
+        {
+          fprintf(stdout, "Chunk number 0x%08X (timecode: %s, count %u, length: %u): Type: %u. Number (Player ID?): %u. Payload:\n",
+                  timecode, timecode_to_string(timecode).c_str(), block_count, chunklen, chunktype, player_id);
+          hexdump(stdout, buf+11, chunklen-11, "  ");
+          fprintf(stdout, "\n");
+        }
+      }
+
+      // Chunk type 3 (audio?)
+      else if (chunktype == 3 && buf[0] == 1 && buf[1] == 0 && buf[6] == 0x0D &&
+               READ_UINT32LE(buf+7) == timecode && READ_UINT32LE(buf+chunklen) == 0 && hsix  == 0x1E)
+      {
+        if (opts.dumpaudio && audioout)
+        {
+          fprintf(stderr, "  writing audio chunk 0x%02X%02X (length: %2u bytes vs. %2u)...\n", buf[11], buf[12], READ_UINT16LE(buf[13], buf[14]), chunklen-15);
+          if(READ_UINT16LE(buf[13], buf[14]) != chunklen-15) abort();
+          audioout.write(reinterpret_cast<const char*>(buf) + 15, chunklen - 15);
+        }
+
+        if (opts.type != -1 && opts.type != 3) return true;
+
+        fprintf(stdout, "Chunk number 0x%08X (timecode: %s, count %u, length: %u): Type: %u. Number (Player ID?): %u. Payload:\n",
+                timecode, timecode_to_string(timecode).c_str(), block_count, chunklen, chunktype, READ_UINT32LE(buf+2));
+        hexdump(stdout, buf+11, chunklen-11, "  ");
+        fprintf(stdout, "\n");
+      }
+
+      // Chunk type 3 (empty)
+      else if (chunktype == 3 && buf[0] == 0 && buf[1] == 0 && chunklen == 2 && READ_UINT32LE(buf+chunklen) == 0 && hsix  == 0x1E)
+      {
+        if (opts.type != -1 && opts.type != 3) return true;
+        fprintf(stdout, "Chunk number 0x%08X (timecode: %s, count %u, length: %u): Type: %u. Empty chunk.\n\n",
+                timecode, timecode_to_string(timecode).c_str(), block_count, chunklen, chunktype);
+      }
+
+      // Chunk type 4 (regular)
+      else if (chunktype == 4 && buf[0] == 1 && buf[1] == 0 && buf[6] == 0x0F &&
+               READ_UINT32LE(buf+7) == timecode && READ_UINT32LE(buf+chunklen) == 0 && hsix  == 0x1E)
+      {
+        if (opts.type != -1 && opts.type != 4) return true;
+        fprintf(stdout, "Chunk number 0x%08X (timecode: %s, count %u, length: %u): Type: %u. Number (Player ID?): %u. Payload:\n",
+                timecode, timecode_to_string(timecode).c_str(), block_count, chunklen, chunktype, READ_UINT32LE(buf+2));
+        hexdump(stdout, buf+11, chunklen-11, "  ");
+        fprintf(stdout, "\n");
+      }
+
+      // Chunk type 4 (empty)
+      else if (chunktype == 4 && buf[0] == 0 && buf[1] == 0 && chunklen == 2 && READ_UINT32LE(buf+chunklen) == 0 && hsix  == 0x1E)
+      {
+        if (opts.type != -1 && opts.type != 4) return true;
+        fprintf(stdout, "Chunk number 0x%08X (timecode: %s, count %u, length: %u): Type: %u. Empty chunk.\n\n",
+                timecode, timecode_to_string(timecode).c_str(), block_count, chunklen, chunktype);
+      }
+
+      // Chunk type 1, skirmish, empty chunk
+      else if (chunktype == 1 && chunklen == 5 && hnumber1 == 4 && READ_UINT32LE(buf+chunklen) == 0 && READ_UINT32LE(buf+1) == 0 && buf[0] == 1)
+      {
+        if (opts.type != -1 && opts.type != 1) return true;
+        fprintf(stdout, "Chunk number 0x%08X (timecode: %s, count %u, length: %u): Type: %u. Empty chunk (skirmish only).\n\n",
+                timecode, timecode_to_string(timecode).c_str(), block_count, chunklen, chunktype);
+      }
+
+      // Chunk type 254 (RA3 only)
+      else if (chunktype == -2 && READ_UINT32LE(buf+chunklen) == 0)
+      {
+        if (opts.type != -1 && opts.type != -2) return true;
+        fprintf(stdout, "Chunk number 0x%08X (timecode: %s, count %u, length: %u): Type: %d. Raw data:\n",
+                timecode, timecode_to_string(timecode).c_str(), block_count, chunklen, (int)(chunktype));
+        hexdump(stdout, buf, chunklen, "  ");
+        fprintf(stdout, "\n");
+      }
+
+      // Otherwise: Panic!
+      else
+      {
+        fprintf(stderr, "\n************** Warning: Unexpected chunk data!\n");
+        fprintf(stdout, "Chunk number 0x%08X (timecode: %s, count %u, length: %u): Type: %d. Raw data:\n",
+                timecode, timecode_to_string(timecode).c_str(), block_count, chunklen, (int)(chunktype));
+        hexdump(stdout, buf, chunklen+4, "XYZZY   ");
+        fprintf(stdout, "\n");
+
+        return false;
+      }
+      return true;
 }
