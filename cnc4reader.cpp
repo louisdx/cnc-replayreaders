@@ -1,6 +1,7 @@
 #include "replayreader.h"
 
-/* g++ -O4 -s -o cnc4replayreader.exe cnc4reader.cpp -enable-auto-import -static-libgcc -static-libstdc++ -fwhole-program -std=gnu++0x */
+/* g++ -O4 -s -o cnc4replayreader.exe cnc4reader.cpp replayreader.cpp \
+       -enable-auto-import -static-libgcc -static-libstdc++ -fwhole-program -std=gnu++0x */
 
 /* Chunks come in types 1 and 2.
 
