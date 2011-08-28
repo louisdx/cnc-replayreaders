@@ -111,9 +111,10 @@ ENDIF</div>
 
     <p>The values in the header are mostly self-explanatory, though some remarks are in order.</p>
     <ul>
-      <li>In <em>Tiberium Wars</em> and <em>Red Alert 3</em>, there is a 22-byte field <strong>mod_info</strong>. This is tokenized into
-      null-terminated strings with information about the mod used for the replay. The default game mod names are "CNC3" and "RA3", respectively.
-      The entire field is absent in <em>Kane&rsquo;s Wrath</em> replays.</li>
+      <li>In <em>Tiberium Wars</em> 1.07 and above, and in <em>Red Alert 3</em>, there is a 22-byte field
+      <strong>mod_info</strong>. This is tokenized into null-terminated strings with information about the
+      mod used for the replay. The default game mod names are "CNC3" and "RA3", respectively. The entire field
+      is absent in <em>Kane&rsquo;s Wrath</em> replays and <em>Tiberium Wars</em> up to version 1.06.</li>
       <li>The <strong>timestamp</strong> is a standard Unix timestamp for the date and time in GMT.</li>
       <li><strong>replay_saver</strong> is the 0-based index of the player who saved the replay.</li>
       <li>The values of <strong>date_time</strong> have the following meaning: 0: year, 1: month, 2: weekday (0-6 = Sun-Sat), 3: day, 4: hour, 5: minute, 6: second. The meaning of value 7 is unknown.</li>
@@ -123,7 +124,7 @@ ENDIF</div>
       <li>The value of <strong>offset</strong> is the difference between the beginning of the first chunk and the beginning of the &ldquo;CNC3RPL\0&rdquo; magic
       (<strong>str_repl_magic</strong>).</li>
       <li>The meaning of the data in <strong>unknown1</strong> and <strong>unknown2</strong> is unknown.</li>
-      <li>The bulk of header information is contained in the plain-text string <strong>header</strong>. This is a semicolon-separated list of items of the form &ldquo;key&nbsp;=&nbsp;value&rdquo;. When the key is &ldquo;S&rdquo;, the value is a colon-separated list of items. Each item describes one player slot (including observers and commentators), and each item consists of a comma-separated list of tokens. The first token is of the form &ldquo;H<em>name</em>&rdquo;, where <em>name</em> is the player name; the second token is the IP address (ASCII represention of a hexadecimal number), the sixth token specifies the faction.</li>
+      <li>The bulk of header information is contained in the plain-text string <strong>header</strong>. This is a semicolon-separated list of items of the form &ldquo;key&nbsp;=&nbsp;value&rdquo;. When the key is &ldquo;S&rdquo;, the value is a colon-separated list of items. Each item describes one player slot (including observers and commentators), and each item consists of a comma-separated list of tokens. The first token is of the form &ldquo;H<em>name</em>&rdquo;, where <em>name</em> is the player name, or &ldquo;C[E|M|H|B]&rdquo; for computer opponents; the second token is the IP address (ASCII represention of a hexadecimal number), the sixth token specifies the faction.</li>
     </ul>
 
     <h3>The replay body</h3>
@@ -169,24 +170,19 @@ uint32_t  footer_length;    // == 0x43 == 67 </div>
     <p>Chunk types 3 and 4 only appear to be present in replays with a commentary track, and it seems that type 3
     contains the audio data and type 4 the telestrator data.</p>
 
-    <p>Let us focus on chunk types 1 and 2. We always have data[0] ==
-    1. For chunks of type 2 we also have data[1] == 0, while for
-    chunks of type 1 we always find that the last byte is 0xFF. Let us thus
+    <p>Let us focus on chunk types 1 and 2. We always have <code>data[0] ==
+    1</code>. For chunks of type 2 we also have <code>data[1] == 0</code>. Let us thus
     define the <em>payload data</em> for both chunk types.</p>
 
-    <p><strong>Type 1:</strong> data[chunk_size] has the following structure.</p>
+    <p><strong>Type 1:</strong> <code>data[chunk_size]</code> has the following structure.</p>
     <div class="listing">byte;              // == 1
 uint32_t           number_of_commands;
 byte[chunk_size-5] payload;</div>
 
     <p>The payload contains a number of separate commands, as indicated by <strong>number_of_commands</strong>.
-    Each command is terminated by a variable byte sequence; {0xFF}, {0x00, 0xFF}, or {0x00, 0x00, 0xFF}.
-    Speculatively, if the command is of a fixed size, the terminator may be short; if the command is
-    of variable size, the terminator seems to be the three-byte version.</p>
+    Each command is terminated by 0xFF, but see below for a detailed discussion.</p>
 
-    <p>See below for a detailed discussion.</p>
-
-    <p><strong>Type 2:</strong> data[chunk_size] has the following structure.</p>
+    <p><strong>Type 2:</strong> <code>data[chunk_size]</code> has the following structure.</p>
     <div class="listing">byte;       // == 1
 byte;       // == 0
 uint32_t n; // maybe the player number, 0 &lt;= n &lt; number_of_players ?
@@ -194,10 +190,34 @@ byte;       // == 0x0E in TW/KW, 0x0F in RA3
 uint32_t c; // == time_code;
 byte[chunk_size-11] payload;</div>
 
-    <p>It appears that type-2 chunks only ever appear with chunk_size 24 or 40, and <strong>n</strong> always satisfies the stated bounds.
-    Type-2 chunks of size 24 always appear to have first byte 0x01 and last byte 0x44 or 0x43.</p>
+    <p>It appears that type-2 chunks only ever appear with chunk_size
+    24 or 40, and <code>n</code> always satisfies the stated bounds.
+    Type-2 chunks of size 24 always appear to have first byte 0x01 and
+    last byte 0x44 or 0x43.</p>
 
-    <p>It appears that chunks of type 2 contain per-player data, such as build orders and unit orders. Chunks of type 1 seem to contain camera movements.</p>
+    <p>It is almost certain that chunks of type 2 contain camera
+    movement data, and <code>n</code> is the player number, a
+    zero-based index into the list of players that appears in the
+    plain-text header, as well as a &ldquo;heartbeat&rdquo;. Chunks of
+    type 1 contain user actions that actually affect the gameplay, as well
+    as another set of heartbeats.</p>
+
+    <h3>Heartbeats</h3>
+
+    <p>Several types of replay data get generated automatically and regularly without
+    any user action. Let us call these &ldquo;heartbeats&rdquo; collectively. The nature
+    of this data is not known, but it stands to reason that it serves to confirm the
+    integrity of the game state across the multiple players.</p>
+
+    <p>Each active player creates a type-2 heartbeat once every second, for every logical
+    frame that is a multiple of 15, as well as right at the very start, at timecode 1. This
+    chunk is always 40 bytes long.</p>
+
+    <p>There are also heartbeats in the type-1 chunks. Every three seconds, when the timecode
+    is of the form 45<var>k</var>&nbsp;+&nbsp;1, each player emits a heartbeat command (whose ID
+    depends on the game). There is also another command, currently misdubbed &rdquo;scroll&ldquo;
+    (though it appears to have nothing to do with the camera) which is emitted irregularly, yet for
+    each player in equal number and at a rate of roughly one every two seconds.</p>
 
     <h3>Type-1 Command Chunks</h3>
 
@@ -244,7 +264,7 @@ byte   terminator; // == 0xFF</div>
 
     <p>The creator of <a href="http://www.airlea.nl/kwrt/">TW/KW Replay Tool</a>, <em>Wmm</em>, has generously provided
     his findings on the command types for <em>Red Alert 3</em>. The command-size column either contains a single
-    number for a fixed-size command, &ldquo;std: <var>n</var>&rdquo; for a commmand in standard layout with offset <var>n</var>,
+    number for a fixed-size command, &ldquo;std: <var>n</var>&rdquo; for a command in standard layout with offset <var>n</var>,
     or &ldquo;special&rdquo; for variable-length commands that require special treatment.</p>
 
     <table>
@@ -253,51 +273,51 @@ byte   terminator; // == 0xFF</div>
       </thead>
       <tbody>
 <tr><td>0x00</td><td>45</td><td>Harder secundary ability, like the bunker of Soviet Combat Engineer??</td></tr>
-<tr><td>0x01</td><td>special</td><td>At the end of every replay, just before the header. Shows the creator of the replay.</td></tr>
-<tr><td>0x02</td><td>special</td><td>Put really point.</td></tr>
-<tr><td>0x03</td><td>17</td><td>Upgrade for Allies and Empire.</td></tr>
-<tr><td>0x04</td><td>17</td><td></td></tr>
-<tr><td>0x05</td><td>20</td><td>Build unit.</td></tr>
-<tr><td>0x06</td><td>20</td><td>Cancel unit (two times to cancel it, first time is for hold, second for cancel).</td></tr>
-<tr><td>0x07</td><td>17</td><td>Start building building (only for Allies and Soviets, Empire Cores are seen as units).</td></tr>
-<tr><td>0x08</td><td>17</td><td>Cancel building (two times to cancel it, first time is for hold, second for cancel).</td></tr>
-<tr><td>0x09</td><td>35</td><td>Place building on map (only for Allies and Soviets).</td></tr>
-<tr><td>0x0A</td><td>std: 2</td><td>Sell Building.</td></tr>
+<tr><td>0x01</td><td>special</td><td>For example at the end of every replay; shows the creator of the replay; also observed in other places.</td></tr>
+<tr><td>0x02</td><td>special</td><td>Set rally point.</td></tr>
+<tr><td>0x03</td><td>17</td><td>Start tech upgrade.</td></tr>
+<tr><td>0x04</td><td>17</td><td>Pause/cancel tech upgrade.</td></tr>
+<tr><td>0x05</td><td>20</td><td>Start unit production.</td></tr>
+<tr><td>0x06</td><td>20</td><td>Pause/cancel unit production.</td></tr>
+<tr><td>0x07</td><td>17</td><td>Start building construction. (Allies and Soviets only, Empire Cores are treated as units.)</td></tr>
+<tr><td>0x08</td><td>17</td><td>Pause/cancel building construction.</td></tr>
+<tr><td>0x09</td><td>35</td><td>Place building on map (Allies and Soviets only).</td></tr>
+<tr><td>0x0A</td><td>std: 2</td><td>Sell building.</td></tr>
 <tr><td>0x0C</td><td>special</td><td></td></tr>
-<tr><td>0x0D</td><td>std: 2</td><td>Attack??</td></tr>
-<tr><td>0x0E</td><td>std: 2</td><td></td></tr>
+<tr><td>0x0D</td><td>std: 2</td><td>Attack.</td></tr>
+<tr><td>0x0E</td><td>std: 2</td><td>Force-fire.</td></tr>
 <tr><td>0x0F</td><td>16</td><td></td></tr>
-<tr><td>0x10</td><td>special</td><td></td></tr>
+<tr><td>0x10</td><td>special</td><td>Garrison a building.</td></tr>
 <tr><td>0x12</td><td>std: 2</td><td></td></tr>
 <tr><td>0x14</td><td>16</td><td>Move units.</td></tr>
-<tr><td>0x15</td><td>16</td><td></td></tr>
-<tr><td>0x16</td><td>16</td><td></td></tr>
-<tr><td>0x1A</td><td>std: 2</td><td></td></tr>
+<tr><td>0x15</td><td>16</td><td>Attack-move units.</td></tr>
+<tr><td>0x16</td><td>16</td><td>Force-move units.</td></tr>
+<tr><td>0x1A</td><td>std: 2</td><td>Stop command.</td></tr>
 <tr><td>0x1B</td><td>std: 2</td><td></td></tr>
 <tr><td>0x21</td><td>20</td><td>A heartbeat that every player generates at 45<code>n</code>&nbsp;+&nbsp;1 frames (every 3 seconds).</td></tr>
-<tr><td>0x28</td><td>std: 2</td><td></td></tr>
-<tr><td>0x29</td><td>std: 2</td><td></td></tr>
-<tr><td>0x2A</td><td>std: 2</td><td></td></tr>
-<tr><td>0x2C</td><td>29</td><td></td></tr>
-<tr><td>0x2E</td><td>std: 2</td><td></td></tr>
-<tr><td>0x2F</td><td>std: 2</td><td></td></tr>
+<tr><td>0x28</td><td>std: 2</td><td>Start repair building.</td></tr>
+<tr><td>0x29</td><td>std: 2</td><td>Stop repair building.</td></tr>
+<tr><td>0x2A</td><td>std: 2</td><td>&lsquo;Q&rsquo;-select.</td></tr>
+<tr><td>0x2C</td><td>29</td><td>Formation-move preview.</td></tr>
+<tr><td>0x2E</td><td>std: 2</td><td>Stance change.</td></tr>
+<tr><td>0x2F</td><td>std: 2</td><td>Waypoiny/planning mode.</td></tr>
 <tr><td>0x32</td><td>53</td><td>Harder Security Point usage like Surveillance Sweep.</td></tr>
-<tr><td>0x33</td><td>special</td><td>Some UUID followed by an IP address plus port number</td></tr>
-<tr><td>0x34</td><td>45</td><td>Some UUID</td></tr>
+<tr><td>0x33</td><td>special</td><td>Some UUID followed by an IP address plus port number.</td></tr>
+<tr><td>0x34</td><td>45</td><td>Some UUID.</td></tr>
 <tr><td>0x35</td><td>1049</td><td>Player info?</td></tr>
 <tr><td>0x36</td><td>16</td><td></td></tr>
-<tr><td>0x37</td><td>std: 2</td><td>Scrolling. Even if you don't scroll this command is there.</td></tr>
+<tr><td>0x37</td><td>std: 2</td><td>&ldquo;Scrolling&rdquo;, an irregularly, automatically generated command.</td></tr>
 <tr><td>0x47</td><td>std: 2</td><td>Unknown, always appears in logical frame 5, and than this logical frame contains this command equally as the number of players.</td></tr>
 <tr><td>0x48</td><td>std: 2</td><td></td></tr>
 <tr><td>0x4B</td><td>special</td><td>Place beacon.</td></tr>
 <tr><td>0x4C</td><td>std: 2</td><td>Delete beacon (F9 has something to do with this??).</td></tr>
 <tr><td>0x4D</td><td>???</td><td>Place text in beacon.</td></tr>
-<tr><td>0x4E</td><td>std: 2</td><td>Choose Security Point ability.</td></tr>
+<tr><td>0x4E</td><td>std: 2</td><td>Player power (Secret Protocols).</td></tr>
 <tr><td>0x52</td><td>std: 2</td><td></td></tr>
 <tr><td>0x5F</td><td>11</td><td></td></tr>
-<tr><td>0xF5</td><td>std: 5</td><td>Create selectionbox / Select building, units.</td></tr>
+<tr><td>0xF5</td><td>std: 5</td><td>Drag a selection box and/or select units.</td></tr>
 <tr><td>0xF6</td><td>std: 5</td><td>Unknown. You get this command when building a Empire Dojo Core and deploying it. Than it should appear once, no idea what it does.</td></tr>
-<tr><td>0xF8</td><td>std: 4</td><td>A click with the left mouse button.</td></tr>
+<tr><td>0xF8</td><td>std: 4</td><td>Left mouse button click.</td></tr>
 <tr><td>0xF9</td><td>std: 2</td><td></td></tr>
 <tr><td>0xFA</td><td>std: 7</td><td>Create group.</td></tr>
 <tr><td>0xFB</td><td>std: 2</td><td>Select group.</td></tr>
