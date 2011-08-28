@@ -680,6 +680,8 @@ bool parse_replay_file(const char * filename, Options & opts)
     const command_names_t & cmd_names = gametype == Options::GAME_TW ? TW_cmd_names
         : (gametype == Options::GAME_KW ? KW_cmd_names : RA3_cmd_names);
 
+    std::map<unsigned int, std::pair<unsigned int, unsigned int>> apm_total;
+
     fprintf(stdout, "\nAPM statistics: Type-2 Chunks\n");
     for (apm_2_map_t::const_iterator i = player_2_apm.begin(), end = player_2_apm.end(); i != end; ++i)
       fprintf(stdout,
@@ -698,6 +700,7 @@ bool parse_replay_file(const char * filename, Options & opts)
     }
 
     fprintf(stdout, "\nAPM statistics: Type-1 command histogram\n");
+
     for (apm_histo_map_t::const_iterator i = player_indi_histo_apm.begin(), end = player_indi_histo_apm.end(); i != end; ++i)
     {
       for (auto j = i->second.begin(), end = i->second.end(); j != end; ++j)
@@ -708,14 +711,39 @@ bool parse_replay_file(const char * filename, Options & opts)
                 i->first, j->first, j->second, cn.c_str());
       }
     }
+
     for (apm_histo_map_t::const_iterator i = player_coal_histo_apm.begin(), end = player_coal_histo_apm.end(); i != end; ++i)
     {
       for (auto j = i->second.begin(), end = i->second.end(); j != end; ++j)
       {
         const command_names_t::const_iterator nit = cmd_names.find(j->first);
         const std::string cn = nit == cmd_names.end() ? "" : nit->second;
-        fprintf(stdout, "Cooked player %u -->   command 0x%02X: %u (\"%s\")\n",
+        fprintf(stdout, "Player %u, command 0x%02X: %u (\"%s\")\n",
                 i->first, j->first, j->second, cn.c_str());
+
+        if (gametype == Options::GAME_RA3)
+        {
+          const unsigned int & c = j->first;
+          if (c != 0x21 && c != 0x37)
+          {
+            apm_total[i->first].first += j->second;
+
+            if (c != 0xF8 && c != 0xF5)
+              apm_total[i->first].second += j->second;
+          }
+        }
+      }
+      fprintf(stdout, "\n");
+    }
+
+    if (gametype == Options::GAME_RA3)
+    {
+      fprintf(stdout, "Experimental APM count:\n");
+      for (auto it = apm_total.cbegin(), end = apm_total.cend(); it != end; ++it)
+      {
+        fprintf(stdout, "  Player %u: %u actions including clicks (%.1f apm), %u actions excluding clicks (%.1f apm)\n",
+                it->first, it->second.first, double(it->second.first * 60 * 15)/double(final_timecode),
+                it->second.second, double(it->second.second * 60 * 15)/double(final_timecode));
       }
     }
   }
