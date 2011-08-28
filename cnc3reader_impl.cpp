@@ -63,7 +63,7 @@ bool parse_options(int argc, char * argv[], Options & opts)
 {
   int opt;
 
-  while ((opt = getopt(argc, argv, "A:t:T:f:F:egaRcCkwrpHvh")) != -1)
+  while ((opt = getopt(argc, argv, "A:t:T:f:F:egaRcCkwrpH:vh")) != -1)
   {
     switch (opt)
     {
@@ -105,7 +105,7 @@ bool parse_options(int argc, char * argv[], Options & opts)
       opts.dumpchunks = true;
       break;
     case 'H':
-      opts.filter_heartbeat = true;
+      opts.filter_heartbeat =  std::strtol(optarg, NULL, 0);
       break;
     case 'p':
       opts.apm = true;
@@ -307,6 +307,34 @@ bool parse_chunk1_varlen(const unsigned char * buf, size_t & pos,
   return true;
 }
 
+bool parse_chunk1_uuid(const unsigned char * buf, size_t & pos, size_t len, unsigned int cmd_id, size_t counter, const Options & opts)
+{
+  size_t l = buf[pos + 3];
+  if (len < l) return false;
+
+  std::string s1(buf + pos + 4, buf + pos + 4 + l);
+
+  if (opts.cmd_filter == -1 || opts.cmd_filter == int(cmd_id))
+    fprintf(stdout, " %2i: Command 0x%02X: First string length %u, \"%s\".", counter, cmd_id, l, s1.c_str());
+
+  pos += l + 5;
+
+  l = buf[pos];
+  if (len < l) return false;
+
+  std::string s2 = read2ByteString((const char*)buf + pos + 1, 2 * l);
+
+  pos += 2 * l + 2;
+  if (len < l) return false;
+
+  if (opts.cmd_filter == -1 || opts.cmd_filter == int(cmd_id))
+    fprintf(stdout, " Second string length %u, \"%s\". Number: 0x%08X.\n", l, s2.c_str(), READ_UINT32LE(buf + pos));
+
+  pos += 5;
+
+  return true;
+}
+
 
 
 command_map_t RA3_commands;
@@ -341,10 +369,13 @@ void populate_command_map_TW(command_map_t & tw_commands, command_names_t & tw_c
   tw_commands[0x25] = 17;
   tw_commands[0x26] = 17;
   tw_commands[0x32] = 21;
+  tw_commands[0x33] = 21;
   tw_commands[0x34] = 16;
   tw_commands[0x3B] = 21;
   tw_commands[0x3C] = 16; // OK
   tw_commands[0x3D] = 16;
+  tw_commands[0x3E] = 16;
+  tw_commands[0x51] = 16;
   tw_commands[0x57] = 20; // OK
   tw_commands[0x70] = 29;
   tw_commands[0x7F] = 8;
@@ -356,7 +387,9 @@ void populate_command_map_TW(command_map_t & tw_commands, command_names_t & tw_c
 
   tw_commands[0x1D] = 0;
   tw_commands[0x27] = 0;
+  tw_commands[0x81] = 0;
 
+  tw_commands[0x00] = -2;
   tw_commands[0x01] = -2;
   tw_commands[0x02] = -2;
   tw_commands[0x03] = -2;
@@ -365,21 +398,30 @@ void populate_command_map_TW(command_map_t & tw_commands, command_names_t & tw_c
   tw_commands[0x06] = -2;
   tw_commands[0x07] = -2;
   tw_commands[0x08] = -2;
+  tw_commands[0x09] = -2;
+  tw_commands[0x0A] = -2;
   tw_commands[0x0C] = -2;
   tw_commands[0x0D] = -2;
+  tw_commands[0x0F] = -2;
+  tw_commands[0x10] = -2;
   tw_commands[0x1C] = -15;
+  tw_commands[0x22] = -2;
   tw_commands[0x2A] = -2;
+  tw_commands[0x2B] = -2;
+  tw_commands[0x2C] = -2;
   tw_commands[0x2D] = -2;
   tw_commands[0x39] = -2;
   tw_commands[0x3A] = -2;
   tw_commands[0x42] = -2;
   tw_commands[0x43] = -2;
   tw_commands[0x68] = -2;
+  tw_commands[0x69] = -2;
   tw_commands[0x6D] = -2;
   tw_commands[0x74] = -2;
   tw_commands[0x75] = -2;
   tw_commands[0x7D] = -2;
   tw_commands[0x85] = -2;
+  tw_commands[0x88] = -2;
   tw_commands[0xF5] = -4;
   tw_commands[0xF6] = -4;
   tw_commands[0xF8] = -4;
@@ -389,6 +431,7 @@ void populate_command_map_TW(command_map_t & tw_commands, command_names_t & tw_c
   tw_commands[0xFC] = -2;
   tw_commands[0xFD] = -2;
   tw_commands[0xFE] = -2;
+  tw_commands[0xFF] = -2;
 }
 
 void populate_command_map_KW(command_map_t & kw_commands, command_names_t & kw_cmd_names)
@@ -455,12 +498,7 @@ void populate_command_map_RA3(command_map_t & ra3_commands, command_names_t & ra
   ra3_commands[0x15] = 16; // OK
   ra3_commands[0x16] = 16; // OK
   ra3_commands[0x21] = 20; // OK
-  ra3_commands[0x28] = -2;
-  ra3_commands[0x29] = -2;
-  ra3_commands[0x2A] = -2;
   ra3_commands[0x2C] = 29; // OK
-  ra3_commands[0x2E] = -2;
-  ra3_commands[0x2F] = -2;
   ra3_commands[0x32] = 53;
   ra3_commands[0x34] = 45;
   ra3_commands[0x35] = 1049;
@@ -482,23 +520,32 @@ void populate_command_map_RA3(command_map_t & ra3_commands, command_names_t & ra
   ra3_commands[0x12] = -2;
   ra3_commands[0x1A] = -2;
   ra3_commands[0x1B] = -2;
+  ra3_commands[0x28] = -2;
+  ra3_commands[0x29] = -2;
+  ra3_commands[0x2A] = -2;
+  ra3_commands[0x2E] = -2;
+  ra3_commands[0x2F] = -2;
   ra3_commands[0x37] = -2;
   ra3_commands[0x47] = -2;
   ra3_commands[0x48] = -2;
   ra3_commands[0x4C] = -2;
   ra3_commands[0x4E] = -2;
   ra3_commands[0x52] = -2;
+  ra3_commands[0xF5] = -5;
+  ra3_commands[0xF6] = -5;
   ra3_commands[0xF8] = -4;
+  ra3_commands[0xF9] = -2;
+  ra3_commands[0xFA] = -7;
   ra3_commands[0xFB] = -2;
   ra3_commands[0xFC] = -2;
   ra3_commands[0xFD] = -7;
-  ra3_commands[0xF5] = -5;
-  ra3_commands[0xF6] = -5;
-  ra3_commands[0xF9] = -2;
-  ra3_commands[0xFA] = -7;
   ra3_commands[0xFE] = -15;
   ra3_commands[0xFF] = -34;
 
+  ra3_cmd_names[0x07] = "start building";
+  ra3_cmd_names[0x08] = "pause/cancel building";
+  ra3_cmd_names[0x09] = "place building";
+  ra3_cmd_names[0x21] = "3s heartbeat";
   ra3_cmd_names[0x37] = "scroll";
   ra3_cmd_names[0xFA] = "create group";
   ra3_cmd_names[0xFB] = "select group";
@@ -634,16 +681,7 @@ bool dumpchunks(const unsigned char * buf, char chunktype, unsigned int chunklen
               }
               else if (cmd_id == 0x33)
               {
-                size_t l = buf[pos + 3];
-                std::string s1(buf + pos + 4, buf + pos + 4 + l);
-                fprintf(stdout, " %2i: Command 0x33: First string length %u, \"%s\".", counter, l, s1.c_str());
-                pos += l + 5;
-                l = buf[pos];
-                std::string s2 = read2ByteString((const char*)buf + pos + 1, 2 * l);
-                fprintf(stdout, " Second string length %u, \"%s\".", l, s2.c_str());
-                pos += 2 * l + 2;
-                fprintf(stdout, " Number: 0x%08X.\n", READ_UINT32LE(buf + pos));
-                pos += 5;
+                parse_chunk1_uuid(buf, pos, chunklen, cmd_id, counter, opts);
               }
               else
               {
@@ -722,6 +760,10 @@ bool dumpchunks(const unsigned char * buf, char chunktype, unsigned int chunklen
                   fprintf(stdout, " %2i: Command 0x%02X, special length %u.\n", counter, cmd_id, pos - opos);
                 }
               }
+              else if (cmd_id == 0x81)
+              {
+                parse_chunk1_uuid(buf, pos, chunklen, cmd_id, counter, opts);
+              }
               else
               {
                 fprintf(stdout, "Warning: Unrecognized variable-length command.\n");
@@ -772,14 +814,17 @@ bool dumpchunks(const unsigned char * buf, char chunktype, unsigned int chunklen
 
         if (opts.apm)
         {
-          player_2_apm[player_id].counter[0]++;
-          if (chunklen == 40)      player_2_apm[player_id].counter[1]++;
+          // Counters: 0 - heartbeat, 1 - other 40 byte, 2 - 24 byte
+
+          if (chunklen == 40 && (timecode % 15 == 0 || timecode == 1)) player_2_apm[player_id].counter[0]++;
+          else if (chunklen == 40) player_2_apm[player_id].counter[1]++;
           else if (chunklen == 24) player_2_apm[player_id].counter[2]++;
           else                     player_2_apm[player_id].counter[3]++;
         }
 
         if (opts.type != -1 && opts.type != 2) return true;
-        if (opts.type == 2 && opts.filter_heartbeat && timecode % 15 && timecode != 1) return true;
+        if (opts.type == 2 && opts.filter_heartbeat == 1 && timecode % 15 && timecode != 1) return true;
+        if (opts.type == 2 && opts.filter_heartbeat == 0 && (timecode % 15 == 0 || timecode == 1)) return true;
 
         if (!opts.apm)
         {
@@ -803,18 +848,25 @@ bool dumpchunks(const unsigned char * buf, char chunktype, unsigned int chunklen
 
         if (opts.type != -1 && opts.type != 3) return true;
 
-        fprintf(stdout, "Chunk number 0x%08X (timecode: %s, count %u, length: %u): Type: %u. Number (Player ID?): %u. Payload:\n",
-                timecode, timecode_to_string(timecode).c_str(), block_count, chunklen, chunktype, READ_UINT32LE(buf+2));
-        hexdump(stdout, buf+11, chunklen-11, "  ");
-        fprintf(stdout, "\n");
+        if (!opts.apm)
+        {
+          fprintf(stdout, "Chunk number 0x%08X (timecode: %s, count %u, length: %u): Type: %u. Number (Player ID?): %u. Payload:\n",
+                  timecode, timecode_to_string(timecode).c_str(), block_count, chunklen, chunktype, READ_UINT32LE(buf+2));
+          hexdump(stdout, buf+11, chunklen-11, "  ");
+          fprintf(stdout, "\n");
+        }
       }
 
       // Chunk type 3 (empty)
       else if (chunktype == 3 && buf[0] == 0 && buf[1] == 0 && chunklen == 2 && READ_UINT32LE(buf+chunklen) == 0 && hsix  == 0x1E)
       {
         if (opts.type != -1 && opts.type != 3) return true;
-        fprintf(stdout, "Chunk number 0x%08X (timecode: %s, count %u, length: %u): Type: %u. Empty chunk.\n\n",
-                timecode, timecode_to_string(timecode).c_str(), block_count, chunklen, chunktype);
+
+        if (!opts.apm)
+        {
+          fprintf(stdout, "Chunk number 0x%08X (timecode: %s, count %u, length: %u): Type: %u. Empty chunk.\n\n",
+                  timecode, timecode_to_string(timecode).c_str(), block_count, chunklen, chunktype);
+        }
       }
 
       // Chunk type 4 (regular)
@@ -822,36 +874,52 @@ bool dumpchunks(const unsigned char * buf, char chunktype, unsigned int chunklen
                READ_UINT32LE(buf+7) == timecode && READ_UINT32LE(buf+chunklen) == 0 && hsix  == 0x1E)
       {
         if (opts.type != -1 && opts.type != 4) return true;
-        fprintf(stdout, "Chunk number 0x%08X (timecode: %s, count %u, length: %u): Type: %u. Number (Player ID?): %u. Payload:\n",
-                timecode, timecode_to_string(timecode).c_str(), block_count, chunklen, chunktype, READ_UINT32LE(buf+2));
-        hexdump(stdout, buf+11, chunklen-11, "  ");
-        fprintf(stdout, "\n");
+
+        if (!opts.apm)
+        {
+          fprintf(stdout, "Chunk number 0x%08X (timecode: %s, count %u, length: %u): Type: %u. Number (Player ID?): %u. Payload:\n",
+                  timecode, timecode_to_string(timecode).c_str(), block_count, chunklen, chunktype, READ_UINT32LE(buf+2));
+          hexdump(stdout, buf+11, chunklen-11, "  ");
+          fprintf(stdout, "\n");
+        }
       }
 
       // Chunk type 4 (empty)
       else if (chunktype == 4 && buf[0] == 0 && buf[1] == 0 && chunklen == 2 && READ_UINT32LE(buf+chunklen) == 0 && hsix  == 0x1E)
       {
         if (opts.type != -1 && opts.type != 4) return true;
-        fprintf(stdout, "Chunk number 0x%08X (timecode: %s, count %u, length: %u): Type: %u. Empty chunk.\n\n",
-                timecode, timecode_to_string(timecode).c_str(), block_count, chunklen, chunktype);
+
+        if (!opts.apm)
+        {
+          fprintf(stdout, "Chunk number 0x%08X (timecode: %s, count %u, length: %u): Type: %u. Empty chunk.\n\n",
+                  timecode, timecode_to_string(timecode).c_str(), block_count, chunklen, chunktype);
+        }
       }
 
       // Chunk type 1, skirmish, empty chunk
       else if (chunktype == 1 && chunklen == 5 && hnumber1 == 4 && READ_UINT32LE(buf+chunklen) == 0 && READ_UINT32LE(buf+1) == 0 && buf[0] == 1)
       {
         if (opts.type != -1 && opts.type != 1) return true;
-        fprintf(stdout, "Chunk number 0x%08X (timecode: %s, count %u, length: %u): Type: %u. Empty chunk (skirmish only).\n\n",
-                timecode, timecode_to_string(timecode).c_str(), block_count, chunklen, chunktype);
+
+        if (!opts.apm)
+        {
+          fprintf(stdout, "Chunk number 0x%08X (timecode: %s, count %u, length: %u): Type: %u. Empty chunk (skirmish only).\n\n",
+                  timecode, timecode_to_string(timecode).c_str(), block_count, chunklen, chunktype);
+        }
       }
 
       // Chunk type 254 (RA3 only)
       else if (chunktype == -2 && READ_UINT32LE(buf+chunklen) == 0)
       {
         if (opts.type != -1 && opts.type != -2) return true;
-        fprintf(stdout, "Chunk number 0x%08X (timecode: %s, count %u, length: %u): Type: %d. Raw data:\n",
-                timecode, timecode_to_string(timecode).c_str(), block_count, chunklen, (int)(chunktype));
-        hexdump(stdout, buf, chunklen, "  ");
-        fprintf(stdout, "\n");
+
+        if (!opts.apm)
+        {
+          fprintf(stdout, "Chunk number 0x%08X (timecode: %s, count %u, length: %u): Type: %d. Raw data:\n",
+                  timecode, timecode_to_string(timecode).c_str(), block_count, chunklen, (int)(chunktype));
+          hexdump(stdout, buf, chunklen, "  ");
+          fprintf(stdout, "\n");
+        }
       }
 
       // Otherwise: Panic!

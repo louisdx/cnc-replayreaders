@@ -517,19 +517,21 @@ bool parse_replay_file(const char * filename, Options & opts)
     }
   }
 
-  // 9 bytes after global header #2, expected {1-8} all zero.
+  if ((unsigned int)(dummy3[0]) < playerNames2.size())
+    fprintf(stdout, "The player who saved this replay was number %u (%s).\n", dummy3[0], playerNames2[dummy3[0]][0].c_str());
+  else
+    fprintf(stdout, "Warning: unexpected value for the index of the player who saved the replay (got: %u)!\n", dummy3[0]);
+
+  // 8 bytes after global header #2 + 1, expected all zero.
   if (array_is_zero(reinterpret_cast<unsigned char*>(dummy3)+1, 8))
   {
-    if ((unsigned int)(dummy3[0]) < playerNames2.size())
-      fprintf(stdout, "The player who saved this replay was number %u (%s).\n", dummy3[0], playerNames2[dummy3[0]][0].c_str());
-    else
-      fprintf(stdout, "Warning: unexpected value for the index of the player who saved the replay (got: %u)!\n", dummy3[0]);
-
     fprintf(stdout, "We skipped   8 expected mysterious bytes which were all zero.\n");
   }
   else
-    fprintf(stdout, "We skipped 9 mysterious bytes which were unexpected; values: 0x%02X 0x%02X 0x%02X 0x%02X 0x%02X 0x%02X 0x%02X 0x%02X 0x%02X\n",
-            dummy3[0], dummy3[1], dummy3[2], dummy3[3], dummy3[4], dummy3[5], dummy3[6], dummy3[7], dummy3[8]);
+  {
+    fprintf(stdout, "We skipped 8 mysterious bytes which were unexpected; values: 0x%02X 0x%02X 0x%02X 0x%02X 0x%02X 0x%02X 0x%02X 0x%02X\n",
+            dummy3[1], dummy3[2], dummy3[3], dummy3[4], dummy3[5], dummy3[6], dummy3[7], dummy3[8]);
+  }
 
   // 19/20 uint32_t's after the version magic
   if (gametype == Options::GAME_RA3)
@@ -681,7 +683,7 @@ bool parse_replay_file(const char * filename, Options & opts)
     fprintf(stdout, "\nAPM statistics: Type-2 Chunks\n");
     for (apm_2_map_t::const_iterator i = player_2_apm.begin(), end = player_2_apm.end(); i != end; ++i)
       fprintf(stdout,
-              "Player %u: Total: %u actions (%.1f apm). Len40: %u (%.1f). Len24: %u (%.1f). Other: %u (%.1f).\n",
+              "Player %u: 1s-heartbeats: %u (%.1f). Len40: %u (%.1f). Len24: %u (%.1f). Other: %u (%.1f).\n",
               i->first,
               i->second.counter[0], (double)(i->second.counter[0])*15.0*60.0/(double)(final_timecode),
               i->second.counter[1], (double)(i->second.counter[1])*15.0*60.0/(double)(final_timecode),
