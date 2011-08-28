@@ -86,7 +86,7 @@ struct Options
 
   Options() : type(-1), cmd_filter(-1), fixpos(0), fixfn(NULL), audiofn(NULL),
               autofix(false), breakonerror(false), dumpchunks(false), dumpchunkswithraw(false),
-              dumpaudio(false), filter_heartbeat(false), printraw(false),
+              dumpaudio(false), filter_heartbeat(-1), printraw(false),
               apm(false), fixbroken(false), gametype(GAME_UNDEF), verbose(false) {}
 
   int type;
@@ -99,7 +99,7 @@ struct Options
   bool dumpchunks;
   bool dumpchunkswithraw;
   bool dumpaudio;
-  bool filter_heartbeat;
+  int  filter_heartbeat;
   bool printraw;
   bool apm;
   bool fixbroken;
