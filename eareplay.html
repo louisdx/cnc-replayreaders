@@ -208,17 +208,44 @@ byte   player_id;
 byte   code[command_size - 3];
 byte   terminator; // == 0xFF</div>
 
-    <p>The value of <strong>command_size</strong> depends on the command type, which is determined by <strong>command_id</strong>.
-    Some commands are of fixed size, but some are of variable size and one must look for the terminator. Speculatively,
-    if a command is of variable size, the terminator is in fact {0x00, 0x00, 0xFF}. Note that the byte 0xFF may occur
-    regularly inside a command (of fixed width?), so that the actual mapping from command_id to command_size is essential.</p>
+    <p>The value of <strong>command_size</strong> depends on the command type, which is determined by <strong>command_id</strong>:</p>
+    <ul>
+      <li>Some commands are of fixed size.</li>
+      <li>Some few commands are of variable size that need special treatment. There may be a
+          either a set of fixed options, or there may be a size value somewhere in the command.
+          See the replay reader source code for those special cases.</li>
+      <li>The majority of commands are of variable size but of <strong>standard layout</strong>.
+          This layout depends on a single offset parameter, <strong>n</strong>, and is described
+          below.</li>
+    </ul>
 
-    <p>It is not clear how player ids are computed, although the appear to be ordered
-    in the order in which players appear in the (plain-text) header, and the number appears
-    to increment by 8 from player to player.</p>
+    <p><strong>Standard-layout variable-sized commands.</strong> A command of standard layout
+    with offset <code>n</code> has the following form:</p>
+    <ol>
+      <li><code>payload[0]</code>: Command ID</li>
+      <li><code>payload[1]</code>: Player ID</li>
+      <li>If <code>n</code>&nbsp;&gt;&nbsp;2, here come <code>n</code>&nbsp;&minus;&nbsp;2 bytes
+          of command header.</li>
+      <li>Here comes a loop: Let <code>x</code> be a byte, and set <code>x = payload[n];</code>.
+          <ul>
+            <li>If <code>x == 0xFF</code> stop, you have reached the end of the command.
+            <li>Let <code>c = (x >> 4) + 1;</code>, i.e. take the upper four bits of <code>x</code> and add one.</li>
+            <li>Read in <code>c</code> values that are 32-bit integers.
+            <li>Read in one more byte and assign it to <code>x</code>, and repeat the loop.
+          </ul>
+      </li>
+      <li>It is unknown whether the lower four bits of <code>x</code> have any
+          relevance. The only observed values are 0, 4 and 5.
+    </ol>
+
+    <p>The player IDs in type-1 chunk commands appear to relate to the player index in the plain-text header by
+       a simple formula: <code>index = player_id / 8 - k</code>, where <code>k</code> is 3 for <em>Tiberium
+       Wars</em> and <em>Kane&rsquo;s Wrath</em> and 2 for <em>Red Alert 3</em>.</p>
 
     <p>The creator of <a href="http://www.airlea.nl/kwrt/">TW/KW Replay Tool</a>, <em>Wmm</em>, has generously provided
-    his findings on the command types for <em>Red Alert 3</em>.</p>
+    his findings on the command types for <em>Red Alert 3</em>. The command-size column either contains a single
+    number for a fixed-size command, &ldquo;std: <var>n</var>&rdquo; for a commmand in standard layout with offset <var>n</var>,
+    or &ldquo;special&rdquo; for variable-length commands that require special treatment.</p>
 
     <table>
       <thead>
@@ -226,8 +253,8 @@ byte   terminator; // == 0xFF</div>
       </thead>
       <tbody>
 <tr><td>0x00</td><td>45</td><td>Harder secundary ability, like the bunker of Soviet Combat Engineer??</td></tr>
-<tr><td>0x01</td><td><em>var.</em></td><td>At the end of every replay, just before the header. Shows the creator of the replay.</td></tr>
-<tr><td>0x02</td><td>32</td><td>Put really point.</td></tr>
+<tr><td>0x01</td><td>special</td><td>At the end of every replay, just before the header. Shows the creator of the replay.</td></tr>
+<tr><td>0x02</td><td>special</td><td>Put really point.</td></tr>
 <tr><td>0x03</td><td>17</td><td>Upgrade for Allies and Empire.</td></tr>
 <tr><td>0x04</td><td>17</td><td></td></tr>
 <tr><td>0x05</td><td>20</td><td>Build unit.</td></tr>
@@ -235,48 +262,49 @@ byte   terminator; // == 0xFF</div>
 <tr><td>0x07</td><td>17</td><td>Start building building (only for Allies and Soviets, Empire Cores are seen as units).</td></tr>
 <tr><td>0x08</td><td>17</td><td>Cancel building (two times to cancel it, first time is for hold, second for cancel).</td></tr>
 <tr><td>0x09</td><td>35</td><td>Place building on map (only for Allies and Soviets).</td></tr>
-<tr><td>0x0A</td><td>8</td><td>Sell Building.</td></tr>
-<tr><td>0x0C</td><td><em>var.</em></td><td></td></tr>
-<tr><td>0x0D</td><td>8</td><td>Attack??</td></tr>
-<tr><td>0x0E</td><td>8</td><td></td></tr>
+<tr><td>0x0A</td><td>std: 2</td><td>Sell Building.</td></tr>
+<tr><td>0x0C</td><td>special</td><td></td></tr>
+<tr><td>0x0D</td><td>std: 2</td><td>Attack??</td></tr>
+<tr><td>0x0E</td><td>std: 2</td><td></td></tr>
 <tr><td>0x0F</td><td>16</td><td></td></tr>
-<tr><td>0x10</td><td><em>var.</em></td><td></td></tr>
-<tr><td>0x12</td><td>8</td><td></td></tr>
+<tr><td>0x10</td><td>special</td><td></td></tr>
+<tr><td>0x12</td><td>std: 2</td><td></td></tr>
 <tr><td>0x14</td><td>16</td><td>Move units.</td></tr>
 <tr><td>0x15</td><td>16</td><td></td></tr>
 <tr><td>0x16</td><td>16</td><td></td></tr>
-<tr><td>0x1A</td><td>3</td><td></td></tr>
-<tr><td>0x1B</td><td>3</td><td></td></tr>
-<tr><td>0x21</td><td>20</td><td>Unknown, all players in the replay seem to have this command the same amount.</td></tr>
-<tr><td>0x28</td><td>8</td><td></td></tr>
-<tr><td>0x29</td><td>8</td><td></td></tr>
-<tr><td>0x2A</td><td>3</td><td></td></tr>
+<tr><td>0x1A</td><td>std: 2</td><td></td></tr>
+<tr><td>0x1B</td><td>std: 2</td><td></td></tr>
+<tr><td>0x21</td><td>20</td><td>A heartbeat that every player generates at 45<code>n</code>&nbsp;+&nbsp;1 frames (every 3 seconds).</td></tr>
+<tr><td>0x28</td><td>std: 2</td><td></td></tr>
+<tr><td>0x29</td><td>std: 2</td><td></td></tr>
+<tr><td>0x2A</td><td>std: 2</td><td></td></tr>
 <tr><td>0x2C</td><td>29</td><td></td></tr>
-<tr><td>0x2E</td><td>12</td><td></td></tr>
-<tr><td>0x2F</td><td>12</td><td></td></tr>
+<tr><td>0x2E</td><td>std: 2</td><td></td></tr>
+<tr><td>0x2F</td><td>std: 2</td><td></td></tr>
 <tr><td>0x32</td><td>53</td><td>Harder Security Point usage like Surveillance Sweep.</td></tr>
-<tr><td>0x33</td><td><em>var.</em></td><td></td></tr>
-<tr><td>0x34</td><td>?</td><td></td></tr>
-<tr><td>0x35</td><td>?</td><td></td></tr>
+<tr><td>0x33</td><td>special</td><td>Some UUID followed by an IP address plus port number</td></tr>
+<tr><td>0x34</td><td>45</td><td>Some UUID</td></tr>
+<tr><td>0x35</td><td>1049</td><td>Player info?</td></tr>
 <tr><td>0x36</td><td>16</td><td></td></tr>
-<tr><td>0x37</td><td>56</td><td>Scrolling. Even if you don't scroll this command is there.</td></tr>
-<tr><td>0x47</td><td>8</td><td>Unknown, always appears in logical frame 5, and than this logical frame contains this command equally as the number of players.</td></tr>
-<tr><td>0x48</td><td>8</td><td></td></tr>
-<tr><td>0x4B</td><td><em>var.</em></td><td>Place beacon.</td></tr>
-<tr><td>0x4C</td><td>8</td><td>Delete beacon (F9 has something to do with this??).</td></tr>
-<tr><td>0x4D</td><td><em>var.</em></td><td>Place text in beacon.</td></tr>
-<tr><td>0x4E</td><td>8</td><td>Choose Security Point ability.</td></tr>
+<tr><td>0x37</td><td>std: 2</td><td>Scrolling. Even if you don't scroll this command is there.</td></tr>
+<tr><td>0x47</td><td>std: 2</td><td>Unknown, always appears in logical frame 5, and than this logical frame contains this command equally as the number of players.</td></tr>
+<tr><td>0x48</td><td>std: 2</td><td></td></tr>
+<tr><td>0x4B</td><td>special</td><td>Place beacon.</td></tr>
+<tr><td>0x4C</td><td>std: 2</td><td>Delete beacon (F9 has something to do with this??).</td></tr>
+<tr><td>0x4D</td><td>???</td><td>Place text in beacon.</td></tr>
+<tr><td>0x4E</td><td>std: 2</td><td>Choose Security Point ability.</td></tr>
+<tr><td>0x52</td><td>std: 2</td><td></td></tr>
 <tr><td>0x5F</td><td>11</td><td></td></tr>
-<tr><td>0xF5</td><td><em>var.</em></td><td>Create selectionbox / Select building, units.</td></tr>
-<tr><td>0xF6</td><td><em>var.</em></td><td>Unknown. You get this command when building a Empire Dojo Core and deploying it. Than it should appear once, no idea what it does.</td></tr>
-<tr><td>0xF8</td><td>5</td><td>A click with the left mouse button.</td></tr>
-<tr><td>0xF9</td><td><em>var.</em></td><td></td></tr>
-<tr><td>0xFA</td><td><em>var.</em></td><td>Create group.</td></tr>
-<tr><td>0xFB</td><td>8</td><td>Select group.</td></tr>
-<tr><td>0xFC</td><td>8</td><td></td></tr>
-<tr><td>0xFD</td><td>13</td><td></td></tr>
-<tr><td>0xFE</td><td><em>var.</em></td><td>Simple use of secundary ability, like those of War Bear, Conscript and Flaktrooper.</td></tr>
-<tr><td>0xFF</td><td><em>var.</em></td><td>Simple select and klick Security Point usage like Sleeper Ambush.</td></tr>
+<tr><td>0xF5</td><td>std: 5</td><td>Create selectionbox / Select building, units.</td></tr>
+<tr><td>0xF6</td><td>std: 5</td><td>Unknown. You get this command when building a Empire Dojo Core and deploying it. Than it should appear once, no idea what it does.</td></tr>
+<tr><td>0xF8</td><td>std: 4</td><td>A click with the left mouse button.</td></tr>
+<tr><td>0xF9</td><td>std: 2</td><td></td></tr>
+<tr><td>0xFA</td><td>std: 7</td><td>Create group.</td></tr>
+<tr><td>0xFB</td><td>std: 2</td><td>Select group.</td></tr>
+<tr><td>0xFC</td><td>std: 2</td><td></td></tr>
+<tr><td>0xFD</td><td>std: 7</td><td></td></tr>
+<tr><td>0xFE</td><td>std: 15</td><td>Simple use of secundary ability, like those of War Bear, Conscript and Flaktrooper.</td></tr>
+<tr><td>0xFF</td><td>std: 34</td><td>Simple select and klick Security Point usage like Sleeper Ambush.</td></tr>
       </tbody>
     </table>
 
