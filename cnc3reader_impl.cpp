@@ -436,12 +436,28 @@ void populate_command_map_TW(command_map_t & tw_commands, command_names_t & tw_c
 
 void populate_command_map_KW(command_map_t & kw_commands, command_names_t & kw_cmd_names)
 {
-  kw_commands[0x05] = 3;
-  kw_commands[0x06] = 3;
-  kw_commands[0x07] = 3;
-  kw_commands[0x27] = 40;
+  kw_commands[0x01] = -2;
+  kw_commands[0x02] = -2;
+  kw_commands[0x03] = -2;
+  kw_commands[0x04] = -2;
+  kw_commands[0x05] = -2;
+  kw_commands[0x06] = -2;
+  kw_commands[0x07] = -2;
+  kw_commands[0x08] = -2;
+  kw_commands[0x09] = -2;
+  kw_commands[0x0B] = -2;
+  kw_commands[0x0C] = -2;
+  kw_commands[0x0D] = -2;
+  kw_commands[0x0F] = -2;
+  kw_commands[0x10] = -2;
+  kw_commands[0x11] = -2;
+  kw_commands[0x12] = -2;
+  kw_commands[0x17] = -2;
+
+  kw_commands[0x27] = -34;
   kw_commands[0x29] = 28;
-  kw_commands[0x2B] = 17;
+  kw_commands[0x2B] = -11;
+  kw_commands[0x2C] = 17;
   kw_commands[0x2E] = 22;
   kw_commands[0x2F] = 17;
   kw_commands[0x30] = 17;
@@ -456,9 +472,11 @@ void populate_command_map_KW(command_map_t & kw_commands, command_names_t & kw_c
   kw_commands[0x45] = 21;
   kw_commands[0x46] = 16;
   kw_commands[0x47] = 16;
-  kw_commands[0x4C] = 3;
+  kw_commands[0x48] = 16;
+  kw_commands[0x5B] = 16;
   kw_commands[0x61] = 20;
-  kw_commands[0x72] = 8;
+  kw_commands[0x72] = -2;
+  kw_commands[0x73] = -2;
   kw_commands[0x77] = 3;
   kw_commands[0x7A] = 29;
   kw_commands[0x7E] = 12;
@@ -469,18 +487,29 @@ void populate_command_map_KW(command_map_t & kw_commands, command_names_t & kw_c
   kw_commands[0x8D] = 1049;
   kw_commands[0x8E] = 16;
   kw_commands[0x8F] = 40;
-  kw_commands[0x92] = 8;
-  kw_commands[0xF8] = 5;
-  kw_commands[0xFD] = 8;
+  kw_commands[0x90] = 16;
+  kw_commands[0x91] = 10;
 
-  kw_commands[0x26] = 0;
+  kw_commands[0x28] = 0;
   kw_commands[0x2D] = 0;
   kw_commands[0x31] = 0;
-  kw_commands[0xF5] = 0;
-  kw_commands[0xF6] = 0;
-  kw_commands[0xF9] = 0;
-  kw_commands[0xFB] = 0;
-  kw_commands[0xFC] = 0;
+  kw_commands[0x8B] = 0;
+
+  kw_commands[0x26] = -15;
+  kw_commands[0x4C] = -2;
+  kw_commands[0x4D] = -2;
+  kw_commands[0x92] = -2;
+  kw_commands[0x93] = -2;
+  kw_commands[0xF5] = -4;
+  kw_commands[0xF6] = -4;
+  kw_commands[0xF8] = -4;
+  kw_commands[0xF9] = -2;
+  kw_commands[0xFA] = -2;
+  kw_commands[0xFB] = -2;
+  kw_commands[0xFC] = -2;
+  kw_commands[0xFD] = -2;
+  kw_commands[0xFE] = -2;
+  kw_commands[0xFF] = -2;
 }
 
 void populate_command_map_RA3(command_map_t & ra3_commands, command_names_t & ra3_cmd_names)
@@ -602,7 +631,7 @@ bool dumpchunks(const unsigned char * buf, char chunktype, unsigned int chunklen
 
         const size_t ncommands = READ_UINT32LE(buf+1);
 
-        if (!opts.apm)
+        if (!opts.apm && opts.dumpchunkswithraw)
         {
           fprintf(stdout, "Chunk number 0x%08X (timecode: %s, count %u, length: %u): Type: %u. Number of commands: %u."
                   //" Payload:"
@@ -675,14 +704,9 @@ bool dumpchunks(const unsigned char * buf, char chunktype, unsigned int chunklen
               }
               else if (cmd_id == 0x02)
               {
-                if (buf[pos + 20] == 0x02)
-                {
-                  pos += 28;
-                }
-                else
-                {
-                  pos += 32;
-                }
+                const size_t l = (buf[pos + 24] + 1) * 2 + 26;
+                pos += l;
+
                 if (opts.cmd_filter == -1 || opts.cmd_filter == int(cmd_id))
                 {
                   fprintf(stdout, " %2i: Command 0x%02X, special length %u.\n", counter, cmd_id, pos - opos);
@@ -721,19 +745,7 @@ bool dumpchunks(const unsigned char * buf, char chunktype, unsigned int chunklen
             }
             else if (gametype == Options::GAME_KW)
             {
-              if (cmd_id == 0xF5 || cmd_id == 0xF6)
-              {
-                parse_chunk1_varlen(buf, pos, cmd_id, counter, chunklen, 4, opts);
-              }
-              else if (cmd_id == 0xF9 || cmd_id == 0xFB || cmd_id == 0xFC)
-              {
-                parse_chunk1_varlen(buf, pos, cmd_id, counter, chunklen, 2, opts);
-              }
-              else if (cmd_id == 0x26)
-              {
-                parse_chunk1_varlen(buf, pos, cmd_id, counter, chunklen, 15, opts);
-              }
-              else if (cmd_id == 0x31)
+              if (cmd_id == 0x31)
               {
                 size_t l = buf[pos + 12];
                 pos += l * 18 + 17;
@@ -741,6 +753,16 @@ bool dumpchunks(const unsigned char * buf, char chunktype, unsigned int chunklen
                 {
                   fprintf(stdout, " %2i: Command 0x%02X, special length %u.\n", counter, cmd_id, pos - opos);
                 }
+              }
+              else if (cmd_id == 0x28)
+              {
+                pos += (buf[pos + 17] + 1) * 4 + 32;
+
+                if (opts.cmd_filter == -1 || opts.cmd_filter == int(cmd_id))
+                {
+                  fprintf(stdout, " %2i: Command 0x%02X, special length %u.\n", counter, cmd_id, pos - opos);
+                }
+
               }
               else if (cmd_id == 0x2D)
               {
@@ -751,6 +773,10 @@ bool dumpchunks(const unsigned char * buf, char chunktype, unsigned int chunklen
                   fprintf(stdout, " %2i: Command 0x%02X, special length %u.\n", counter, cmd_id, pos - opos);
                 }
 
+              }
+              else if (cmd_id == 0x8B)
+              {
+                parse_chunk1_uuid(buf, pos, chunklen, cmd_id, counter, opts);
               }
               else
               {
@@ -828,7 +854,7 @@ bool dumpchunks(const unsigned char * buf, char chunktype, unsigned int chunklen
           if (pos == chunklen) break;
         }
 
-        if (!opts.apm) fprintf(stdout, "\n");
+        if (!opts.apm && opts.dumpchunkswithraw) fprintf(stdout, "\n");
 
         if (counter > ncommands) { fprintf(stdout, "Panic: Too many commands dissected!\n\n"); }
       }

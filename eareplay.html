@@ -145,23 +145,17 @@ uint32_t         zero;         // == 0x00000000</div>
     <h3>Footer</h3>
 
     <p>The footer contains the time code of the final chunk. This makes it possible to determine the duration
-    of the replay without walking through the entire file.</p>
+    of the replay without walking through the entire file. The size of the footer, <n>footer_length</n>, is
+    stored in the final four bytes of the replay. The footer takes the following form:</p>
 
-    <p>In <em>Tiberium Wars</em> and <em>Kane&rsquo;s Wrath</em>, the footer takes one of the following two form, where UFOOT is either 6 or 1.</p>
-
-    <div class="listing">char      footer_str[18];   // == "C&amp;C3 REPLAY FOOTER"
+    <div class="listing">char      footer_str[17/18];   // ==  "RA3 REPLAY FOOTER"/"C&amp;C3 REPLAY FOOTER"
 uint32_t  final_time_code;
-byte      data[UFOOT];      // { 0x01, 0x02, 0x00, 0x00, 0x00, 0x00 } or { 0x02 }
-uint32_t  footer_length;    // either 0x20 for UFOOT == 6 or 0x1B for UFOOT == 1</div>
+byte      data[footer_length - 17/18 - 8];
+uint32_t  footer_length;</div>
 
-    <p>In <em>Red Alert 3</em>, the footer takes the following form.</p>
-
-    <div class="listing">char      footer_str[17];   // == "RA3 REPLAY FOOTER"
-uint32_t  final_time_code;
-byte      data[42];         // usually { 0x01, 0x02, 0x24, 0x00, 0x00, 0x00 } + uint32_t[9]
-uint32_t  footer_length;    // == 0x43 == 67 </div>
-
-    <p>In any case, the meaning of <strong>data</strong> is unknown.</p>
+    <p>The <code>data</code> field is either of length 1 and takes the value 0x02, or otherwise <code>data</code>
+    is of the form <code>{ 0x01, 0x02, uint32_t n, byte footer_payload[n] }</code> (so necessarily
+    <code>n + 6 + 8 + 17/18 == footer_length</code>). The meaning of <code>footer_payload</code> is unknown.</p>
 
     <h3>Replay chunks in Tiberium Wars / Kane&rsquo;s Wrath / Red Alert 3</h3>
 

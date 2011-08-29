@@ -546,19 +546,23 @@ bool parse_replay_file(const char * filename, Options & opts)
   }
   fprintf(stdout, "\n");
 
+  uint32_t footer_offset;
+  dummy = myfile.tellg();
+  myfile.seekg(-4, std::fstream::end);
+  myfile.read(reinterpret_cast<char*>(&footer_offset), 4);
+  fprintf(stdout, "Footer length is %u.", footer_offset);
+
   if (!opts.dumpchunks && !opts.apm && !opts.printraw)
   {
-    uint32_t footer_offset;
-    myfile.seekg(-4, std::fstream::end);
-    myfile.read(reinterpret_cast<char*>(&footer_offset), 4);
-    fprintf(stdout, "Footer length is %u. ", footer_offset);
-
     myfile.seekg((gametype == Options::GAME_RA3 ? 17 : 18) - int(footer_offset), std::fstream::end);
     myfile.read(reinterpret_cast<char*>(&dummy), 4);
-    fprintf(stdout, "Footer chunk number: 0x%08X (timecode: %s); %u bytes / %u frames = %.2f Bpf = %.2f Bps.\n",
+    fprintf(stdout, " Footer chunk number: 0x%08X (timecode: %s); %u bytes / %u frames = %.2f Bpf = %.2f Bps.\n",
             dummy, timecode_to_string(dummy).c_str(), filesize, dummy, double(filesize) / dummy, double(filesize) * 15.0 / dummy);
     return true;
   }
+
+  fprintf(stdout, "\n");
+  myfile.seekg(dummy, std::fstream::beg);
 
   apm_1_map_t player_1_apm;
   apm_2_map_t player_2_apm;
@@ -658,21 +662,12 @@ bool parse_replay_file(const char * filename, Options & opts)
   fprintf(stdout, "Footer magic string as expected.\nFooter chunk number: 0x%08X (timecode: %s).\n",
           final_timecode, timecode_to_string(final_timecode).c_str());
 
-  myfile.read(dummy3, 2);
-  if (gametype == Options::GAME_RA3)
-  {
-    char bra[44];
-    myfile.read(bra, 44);
-    fprintf(stdout, "Numbers in the footer: %u %u", dummy3[0], dummy3[1]);
-    for (size_t i = 0; i < 11; ++i) fprintf(stdout, " %u", READ_UINT32LE(bra+4*i));
-    fprintf(stdout, ".\n");
-  }
-  else
-  {
-    myfile.read(reinterpret_cast<char*>(&dummy), 4);
-    myfile.read(reinterpret_cast<char*>(&hlen), 4);
-    fprintf(stdout, "Numbers in the footer: %u %u %u %u.\n", dummy3[0], dummy3[1], dummy, hlen);
-  }
+  std::vector<char> footerdata(footer_offset - 8 - (gametype == Options::GAME_RA3 ? 17 : 18));
+  myfile.read(footerdata.data(), footerdata.size());
+  fprintf(stdout, "Numbers in the footer:");
+  for (size_t i = 0; i < footerdata.size(); ++i) fprintf(stdout, " 0x%02X", (unsigned char)(footerdata[i]));
+  fprintf(stdout, ".\n");
+
 
   /* Report APM stats */
   if (opts.apm)
