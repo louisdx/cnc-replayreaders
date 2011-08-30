@@ -66,15 +66,7 @@ tb_str    match_map_name;
 tb_str    match_map_id;
 
 byte      number_of_players;
-player_t  player_data[number_of_players];
-
-uint32_t  zero2;                 // == 0x000000
-
-tb_str    another_name;
-
-IF hnumber1 == 0x05
-  byte    another_number;
-ENDIF
+player_t  player_data[number_of_players + 1];  // the additional record at the end might be related to commentating
 
 uint32_t  offset;
 uint32_t  str_repl_length;                 // always == 8
@@ -99,6 +91,7 @@ tb_ch      date_time[8];
 uint32_t   vermagic_len;
 char       vermagic[vermagic_len];
 uint32_t   magic_hash;
+byte       zero4;                 // == 0x00
 
 uint32_2   unknown2[U2_SIZE];</div>
 
@@ -124,8 +117,37 @@ ENDIF</div>
       <li>The value of <strong>offset</strong> is the difference between the beginning of the first chunk and the beginning of the &ldquo;CNC3RPL\0&rdquo; magic
       (<strong>str_repl_magic</strong>).</li>
       <li>The meaning of the data in <strong>unknown1</strong> and <strong>unknown2</strong> is unknown.</li>
-      <li>The bulk of header information is contained in the plain-text string <strong>header</strong>. This is a semicolon-separated list of items of the form &ldquo;key&nbsp;=&nbsp;value&rdquo;. When the key is &ldquo;S&rdquo;, the value is a colon-separated list of items. Each item describes one player slot (including observers and commentators), and each item consists of a comma-separated list of tokens. The first token is of the form &ldquo;H<em>name</em>&rdquo;, where <em>name</em> is the player name, or &ldquo;C[E|M|H|B]&rdquo; for computer opponents; the second token is the IP address (ASCII represention of a hexadecimal number), the sixth token specifies the faction.</li>
+      <li>The bulk of header information is contained in the plain-text string <strong>header</strong>. This is a semicolon-separated list of items of the form &ldquo;key&nbsp;=&nbsp;value&rdquo;. When the key is &ldquo;S&rdquo;, the value is a colon-separated list of items. Each item describes one player slot (including observers and commentators), and each item consists of a comma-separated list of tokens. The first token is of the form &ldquo;H<em>name</em>&rdquo;, where <em>name</em> is the player name, or &ldquo;C[E|M|H|B]&rdquo; for computer opponents; the second token is the IP address (ASCII represention of a hexadecimal number), the sixth token specifies the faction. See next section for details.</li>
     </ul>
+
+    <h3>Plain-text game info</h3>
+
+    <p>Lauren wrote a very nice description of the <strong>header</strong> plain-text string:</p>
+    <div class="listing">GameInfo
+      M= [short; unknown][char[]; MapName];
+      MC= [int; Map CRC]
+      MS= [int; Map File Size]
+      SD= [int; Seed?]
+      GSID= [short; GameSpy (Match) ID]
+      GT= [int; Game...]
+      PC= [int; Post Commentator]
+      RU= [int; Initial Camera Player] [int; Game Speed] [int; Initial Resources] [bool; Broadcast Game] [bool; Allow Commentary] [int; Tape Delay] [bool; Random Crates] [bool; Enable VoIP] [int; ? -1] [int; ? -1] [int; ? -1] [int; ? -1] [int; ? -1]
+      S= [char[]; Player Name],[int; IP],[int; ?],[TT|FT],[int; ?],[Faction],[int; ?],[int; ?],[int; ?],[int; ?],[int; ?],[char[]; Clan Tag]
+      
+      Annotations:
+      M=
+      unknown: hex, 12bit
+      MS=
+      File Size: 0 for custom maps
+      GSID=
+      GameSpy (Match) ID: hex, 5D91 for Skirmish
+      RU=
+      Initial Camera Player: 1 based
+      S=
+      Player Name: (H[uman]PlayerName)|(C[PU](E[asy]|M[edium]|H[ard]|B[rutal]))
+      TT|FT: maybe TrueTrue|FalseTrue, FT only when automatched, FT gets TT when commentated for the replay saver
+      Faction: 1 based, order corresponds to ini
+      Clan Tag: without brackets</div>
 
     <h3>The replay body</h3>
 
@@ -156,6 +178,9 @@ uint32_t  footer_length;</div>
     <p>The <code>data</code> field is either of length 1 and takes the value 0x02, or otherwise <code>data</code>
     is of the form <code>{ 0x01, 0x02, uint32_t n, byte footer_payload[n] }</code> (so necessarily
     <code>n + 6 + 8 + 17/18 == footer_length</code>). The meaning of <code>footer_payload</code> is unknown.</p>
+
+    <p><strong>Warning:</strong> While it appears that the footer could in principle have any length, only certain
+    specific forms of footers may be recognized by the games.</p>
 
     <h3>Replay chunks in Tiberium Wars / Kane&rsquo;s Wrath / Red Alert 3</h3>
 
@@ -269,15 +294,15 @@ byte   terminator; // == 0xFF</div>
 <tr><td>0x00</td><td>45</td><td>Harder secundary ability, like the bunker of Soviet Combat Engineer??</td></tr>
 <tr><td>0x01</td><td>special</td><td>For example at the end of every replay; shows the creator of the replay; also observed in other places.</td></tr>
 <tr><td>0x02</td><td>special</td><td>Set rally point.</td></tr>
-<tr><td>0x03</td><td>17</td><td>Start tech upgrade.</td></tr>
-<tr><td>0x04</td><td>17</td><td>Pause/cancel tech upgrade.</td></tr>
-<tr><td>0x05</td><td>20</td><td>Start unit production.</td></tr>
+<tr><td>0x03</td><td>17</td><td>Start/resume research upgrade.</td></tr>
+<tr><td>0x04</td><td>17</td><td>Pause/cancel research upgrade.</td></tr>
+<tr><td>0x05</td><td>20</td><td>Start/resume unit production.</td></tr>
 <tr><td>0x06</td><td>20</td><td>Pause/cancel unit production.</td></tr>
-<tr><td>0x07</td><td>17</td><td>Start building construction. (Allies and Soviets only, Empire Cores are treated as units.)</td></tr>
+<tr><td>0x07</td><td>17</td><td>Start/resume building construction. (Allies and Soviets only, Empire Cores are treated as units.)</td></tr>
 <tr><td>0x08</td><td>17</td><td>Pause/cancel building construction.</td></tr>
 <tr><td>0x09</td><td>35</td><td>Place building on map (Allies and Soviets only).</td></tr>
 <tr><td>0x0A</td><td>std: 2</td><td>Sell building.</td></tr>
-<tr><td>0x0C</td><td>special</td><td></td></tr>
+<tr><td>0x0C</td><td>special</td><td>Possibly ungarrison?</td></tr>
 <tr><td>0x0D</td><td>std: 2</td><td>Attack.</td></tr>
 <tr><td>0x0E</td><td>std: 2</td><td>Force-fire.</td></tr>
 <tr><td>0x0F</td><td>16</td><td></td></tr>
@@ -294,7 +319,7 @@ byte   terminator; // == 0xFF</div>
 <tr><td>0x2A</td><td>std: 2</td><td>&lsquo;Q&rsquo;-select.</td></tr>
 <tr><td>0x2C</td><td>29</td><td>Formation-move preview.</td></tr>
 <tr><td>0x2E</td><td>std: 2</td><td>Stance change.</td></tr>
-<tr><td>0x2F</td><td>std: 2</td><td>Waypoiny/planning mode.</td></tr>
+<tr><td>0x2F</td><td>std: 2</td><td>Possibly related to waypoint/planning?</td></tr>
 <tr><td>0x32</td><td>53</td><td>Harder Security Point usage like Surveillance Sweep.</td></tr>
 <tr><td>0x33</td><td>special</td><td>Some UUID followed by an IP address plus port number.</td></tr>
 <tr><td>0x34</td><td>45</td><td>Some UUID.</td></tr>
@@ -401,12 +426,12 @@ byte              payload[chunk_size - 12];</div>
     <p>It appears that the footer chunk size is always 64, so the footer chunk is 72 bytes long.</p>
 
 
-    <h2>Generals, Zero Hour, Battle for Middle Earth, Return of the Witchking</h2>
+    <h2>Generals, Zero Hour, Battle for Middle Earth, Rise of the Witch King</h2>
 
     <p>The replay format of the games <em>Generals</em>, <em>Zero
-    Hour</em>, <em>Battle for Middle Earth</em> and <em>Battle for Middle
-    Earth 2</em> (and its community mod <em>Return of the Witch King</em>)
-    are considerably simpler than that of the later games. Most
+    Hour</em>, <em>Battle for Middle Earth</em>, <em>Battle for Middle
+    Earth 2</em>, and its expansion <em>Rise of the Witch King</em>
+    is considerably simpler than that of the later games. Most
     notably, the chunks do not have length information, so one must
     know their sizes by other means. Also, there is no footer, just a
     final chunk.</p>
