@@ -423,23 +423,29 @@ bool parse_replay_file(const char * filename, Options & opts)
 
       for (size_t i = 0; i < subtokens.size(); ++i)
       {
-        if (subtokens[i][0] != 'H') continue;
+        if (subtokens[i][0] != 'H' && !(subtokens[i].size() > 2 && subtokens[i][0] == 'C' && subtokens[i][2] == ',')) continue;
 
-        std::vector<std::string> subsubtokens = tokenize(subtokens[i].substr(1), ",");
+        std::vector<std::string> subsubtokens = tokenize(subtokens[i].substr(subtokens[i][0] == 'C' ? 0 : 1), ",");
 
         if (subsubtokens.size() < 6) { throw std::length_error("Unexpected game header!."); }
 
         playerNames2.push_back(subsubtokens);
 
-        std::istringstream iss("0x" + std::string(subsubtokens[1]));
-        uint32_t v;
-        iss >> std::hex >> v;
+        uint32_t v = std::strtoul(subsubtokens[1].c_str(), NULL, 16);
 
-        fprintf(stdout, "Ingame player name: %s (Faction: %s, IP addr.: 0x%08X, %d.%d.%d.%d) Other data: \"",
-                subsubtokens[0].c_str(), faction(std::atoi(subsubtokens[5].c_str()), gametype).c_str(), v,
-                v>>24, ((v<<8)>>24), ((v<<16)>>24), ((v<<24)>>24) );
-        for (size_t j = 2; j < subsubtokens.size()-1; ++j)
-          std::cout << subsubtokens[j] << ", ";
+        if (subsubtokens[0][0] == 'C')
+        {
+          fprintf(stdout, "Computer opponent:  %s (Faction: %s) Other data: \"",
+                  subsubtokens[0].c_str(), faction(std::atoi(subsubtokens[2].c_str()), gametype).c_str());
+          for (size_t j = 1; j < subsubtokens.size()-1; ++j) std::cout << subsubtokens[j] << ", ";
+        }
+        else
+        {
+          fprintf(stdout, "Ingame player name: %s (Faction: %s, IP addr.: 0x%08X, %d.%d.%d.%d:%s) Other data: \"",
+                  subsubtokens[0].c_str(), faction(std::atoi(subsubtokens[5].c_str()), gametype).c_str(), v,
+                  v>>24, ((v<<8)>>24), ((v<<16)>>24), ((v<<24)>>24), subsubtokens[2].c_str());
+          for (size_t j = 3; j < subsubtokens.size()-1; ++j) std::cout << subsubtokens[j] << ", ";
+        }
         std::cout << subsubtokens[subsubtokens.size()-1] << "\"." << std::endl;
       }
     }
