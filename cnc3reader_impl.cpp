@@ -905,7 +905,10 @@ bool dumpchunks(const unsigned char * buf, char chunktype, unsigned int chunklen
         if (opts.dumpaudio && audioout)
         {
           fprintf(stderr, "  writing audio chunk 0x%02X%02X (length: %2u bytes vs. %2u)...\n", buf[11], buf[12], READ_UINT16LE(buf[13], buf[14]), chunklen-15);
-          if(READ_UINT16LE(buf[13], buf[14]) != chunklen-15) abort();
+
+          if(READ_UINT16LE(buf[13], buf[14]) != chunklen-15)
+            throw std::length_error("Unexpected audio track chunk.");
+
           audioout.write(reinterpret_cast<const char*>(buf) + 15, chunklen - 15);
         }
 
@@ -913,8 +916,8 @@ bool dumpchunks(const unsigned char * buf, char chunktype, unsigned int chunklen
 
         if (!opts.apm)
         {
-          fprintf(stdout, "Chunk number 0x%08X (timecode: %s, count %u, length: %u): Type: %u. Number (Player ID?): %u. Payload:\n",
-                  timecode, timecode_to_string(timecode).c_str(), block_count, chunklen, chunktype, READ_UINT32LE(buf+2));
+          fprintf(stdout, "Chunk number 0x%08X (timecode: %s, count %u, length: %u): Type: %u. Number (Player ID?): %u. Audio counter: %u. Payload:\n",
+                  timecode, timecode_to_string(timecode).c_str(), block_count, chunklen, chunktype, READ_UINT32LE(buf+2), READ_UINT16LE(buf+11, buf+12));
           hexdump(stdout, buf+11, chunklen-11, "  ");
           fprintf(stdout, "\n");
         }
