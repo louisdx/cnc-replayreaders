@@ -718,38 +718,37 @@ bool parse_replay_file(const char * filename, Options & opts)
         fprintf(stdout, "Player %u, command 0x%02X: %u (\"%s\")\n",
                 i->first, j->first, j->second, cn.c_str());
 
-        if (gametype == Options::GAME_RA3)
-        {
-          const unsigned int & c = j->first;
+        const unsigned int & c = j->first;
 
-          /* RA3 APM filter: 0x21: hearbeat
-                             0x37: some automatic, irregular sync command ("scroll"??)
+        /* RA3 APM filter: 0x21: hearbeat
+                           0x37: some automatic, irregular sync command ("scroll"??)
+           KW  APM filter: 0x8F: some automatic, irregular sync command ("scroll"??)
+           TW  APM filter: 0x85: some automatic, irregular sync command ("scroll"??)
 
-                             0xF8: drag selection box and/or select units. We could micro-filter this depending on how many units got selected.
-                             0xF5: left-click on the map, can be used to "deselect" a selected unit, but is also caused by dumb blank clicks.
-          */
+
+           All games:      0xF5: drag selection box and/or select units. We could micro-filter this depending on how many units got selected.
+                           0xF8: left-click on the map, can be used to "deselect" a selected unit, but is also caused by dumb blank clicks.
+        */
           
-          if (c != 0x21 && c != 0x37)
-          {
-            apm_total[i->first].first += j->second;
+        if ((gametype == Options::GAME_RA3 && c != 0x21 && c != 0x37) ||
+            (gametype == Options::GAME_TW  && c != 0x85)              ||
+            (gametype == Options::GAME_KW  && c != 0x8F) )
+        {
+          apm_total[i->first].first += j->second;
 
-            if (c != 0xF8 && c != 0xF5)
-              apm_total[i->first].second += j->second;
-          }
+          if (c != 0xF8 && c != 0xF5)
+            apm_total[i->first].second += j->second;
         }
       }
       fprintf(stdout, "\n");
     }
 
-    if (gametype == Options::GAME_RA3)
+    fprintf(stdout, "Experimental APM count:\n");
+    for (auto it = apm_total.cbegin(), end = apm_total.cend(); it != end; ++it)
     {
-      fprintf(stdout, "Experimental APM count:\n");
-      for (auto it = apm_total.cbegin(), end = apm_total.cend(); it != end; ++it)
-      {
-        fprintf(stdout, "  Player %u: %u actions including clicks (%.1f apm), %u actions excluding clicks (%.1f apm)\n",
-                it->first, it->second.first, double(it->second.first * 60 * 15)/double(final_timecode),
-                it->second.second, double(it->second.second * 60 * 15)/double(final_timecode));
-      }
+      fprintf(stdout, "  Player %u: %u actions including clicks (%.1f apm), %u actions excluding clicks (%.1f apm)\n",
+              it->first, it->second.first, double(it->second.first * 60 * 15)/double(final_timecode),
+              it->second.second, double(it->second.second * 60 * 15)/double(final_timecode));
     }
   }
 
