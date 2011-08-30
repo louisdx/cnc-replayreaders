@@ -271,7 +271,7 @@ bool parse_replay_file(const char * filename, Options & opts)
 
   myfile.read(&nplayers, 1);
 
-  for (int n = 0 ; n < int(nplayers); ++n)
+  for (int n = 0 ; n <= int(nplayers); ++n)
   {
     myfile.read(reinterpret_cast<char*>(&player_id), 4);
     playerIDs.push_back(player_id);
@@ -305,7 +305,7 @@ bool parse_replay_file(const char * filename, Options & opts)
             << "Description:  " << str_matchdesc << std::endl
             << "Map name:     " << str_mapname << std::endl
             << "Map ID:       " << str_mapid << std::endl
-            << std::endl << "Number of players: " << int(nplayers) << std::endl;
+            << std::endl << "Number of players: " << int(nplayers) << ", + 1 additional" << std::endl;
 
   if (hsix  == 0x1E) std::cout << "Commentary track available." << std::endl;
 
@@ -313,22 +313,9 @@ bool parse_replay_file(const char * filename, Options & opts)
     fprintf(stdout, "Team %d (ID: %08X): %s\n", playerNos[i], playerIDs[i], playerNames[i].c_str());
 
   myfile.read(reinterpret_cast<char*>(&dummy), 4);
-  str_anothername = read2ByteString(myfile);
-  fprintf(stdout, "Read four bytes after last human player, should be all zero: 0x%08X.\nOne more name: \"%s\"", dummy, str_anothername.c_str());
-
-  // Multiplayer replay
-  if (hnumber1 == 5)
-  {
-    myfile.read(&onebyte, 1);
-    fprintf(stdout, " (Number: %u)", onebyte);
-  }
-  fprintf(stdout, "\n");
-
-  myfile.read(reinterpret_cast<char*>(&dummy), 4);
-  std::cout << "Offset from CNC3RPL magic to first chunk: 0x" << std::hex << dummy;
-
   firstchunk = (unsigned int)myfile.tellg() + 4 + dummy;
-  std::cout << ", first chunk at 0x" << std::hex << firstchunk << std::endl;
+
+  fprintf(stdout, "\nOffset from CNC3RPL magic to first chunk: 0x%X, first chunk at 0x%X.\n", dummy, firstchunk);
 
   myfile.read(reinterpret_cast<char*>(&dummy), 4);
 
@@ -439,6 +426,9 @@ bool parse_replay_file(const char * filename, Options & opts)
         if (subtokens[i][0] != 'H') continue;
 
         std::vector<std::string> subsubtokens = tokenize(subtokens[i].substr(1), ",");
+
+        if (subsubtokens.size() < 6) { throw std::length_error("Unexpected game header!."); }
+
         playerNames2.push_back(subsubtokens);
 
         std::istringstream iss("0x" + std::string(subsubtokens[1]));
@@ -550,14 +540,26 @@ bool parse_replay_file(const char * filename, Options & opts)
   dummy = myfile.tellg();
   myfile.seekg(-4, std::fstream::end);
   myfile.read(reinterpret_cast<char*>(&footer_offset), 4);
-  fprintf(stdout, "Footer length is %u.", footer_offset);
+
+  if (footer_offset < 100) // a random safety check
+  {
+    fprintf(stdout, "Footer length is %u.", footer_offset);
+  }
+  else
+  {
+    fprintf(stdout, "Invalid footer - is this a defective replay? Footer will be ignored.\n");
+    footer_offset = 0;
+  }
 
   if (!opts.dumpchunks && !opts.apm && !opts.printraw)
   {
-    myfile.seekg((gametype == Options::GAME_RA3 ? 17 : 18) - int(footer_offset), std::fstream::end);
-    myfile.read(reinterpret_cast<char*>(&dummy), 4);
-    fprintf(stdout, " Footer chunk number: 0x%08X (timecode: %s); %u bytes / %u frames = %.2f Bpf = %.2f Bps.\n",
-            dummy, timecode_to_string(dummy).c_str(), filesize, dummy, double(filesize) / dummy, double(filesize) * 15.0 / dummy);
+    if (footer_offset != 0)
+    {
+      myfile.seekg((gametype == Options::GAME_RA3 ? 17 : 18) - int(footer_offset), std::fstream::end);
+      myfile.read(reinterpret_cast<char*>(&dummy), 4);
+      fprintf(stdout, " Footer chunk number: 0x%08X (timecode: %s); %u bytes / %u frames = %.2f Bpf = %.2f Bps.\n",
+              dummy, timecode_to_string(dummy).c_str(), filesize, dummy, double(filesize) / dummy, double(filesize) * 15.0 / dummy);
+    }
     return true;
   }
 
@@ -719,6 +721,14 @@ bool parse_replay_file(const char * filename, Options & opts)
         if (gametype == Options::GAME_RA3)
         {
           const unsigned int & c = j->first;
+
+          /* RA3 APM filter: 0x21: hearbeat
+                             0x37: some automatic, irregular sync command ("scroll"??)
+
+                             0xF8: drag selection box and/or select units. We could micro-filter this depending on how many units got selected.
+                             0xF5: left-click on the map, can be used to "deselect" a selected unit, but is also caused by dumb blank clicks.
+          */
+          
           if (c != 0x21 && c != 0x37)
           {
             apm_total[i->first].first += j->second;

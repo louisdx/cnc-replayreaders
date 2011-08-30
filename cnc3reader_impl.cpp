@@ -572,17 +572,18 @@ void populate_command_map_RA3(command_map_t & ra3_commands, command_names_t & ra
   ra3_commands[0xFF] = -34;
 
   ra3_cmd_names[0x02] = "set rally point";
-  ra3_cmd_names[0x03] = "start upgrade tech";
-  ra3_cmd_names[0x04] = "pause/cancel upgrade tech";
-  ra3_cmd_names[0x05] = "start unit construction";
+  ra3_cmd_names[0x03] = "start/resume research upgrade";
+  ra3_cmd_names[0x04] = "pause/cancel research upgrade";
+  ra3_cmd_names[0x05] = "start/resume unit construction";
   ra3_cmd_names[0x06] = "pause/cancel unit construction";
-  ra3_cmd_names[0x07] = "start structure construction";
+  ra3_cmd_names[0x07] = "start/resume structure construction";
   ra3_cmd_names[0x08] = "pause/cancel structure construction";
   ra3_cmd_names[0x09] = "place structure";
   ra3_cmd_names[0x0A] = "sell structure";
 
+  ra3_cmd_names[0x0C] = "ungarrison structure (?)";
   ra3_cmd_names[0x0D] = "attack";
-  ra3_cmd_names[0x0E] = "force-fire (?)";
+  ra3_cmd_names[0x0E] = "force-fire";
 
   ra3_cmd_names[0x10] = "garrison structure";
 
@@ -598,11 +599,12 @@ void populate_command_map_RA3(command_map_t & ra3_commands, command_names_t & ra
   ra3_cmd_names[0x2A] = "'Q' select";
   ra3_cmd_names[0x2C] = "formation-move preview";
   ra3_cmd_names[0x2E] = "stance change";
-  ra3_cmd_names[0x2F] = "waypoint/planning mode";
+  ra3_cmd_names[0x2F] = "waypoint/planning mode (?)";
   ra3_cmd_names[0x37] = "'scroll'";
   ra3_cmd_names[0x4E] = "player power";
   ra3_cmd_names[0xF5] = "drag selection box and/or select units/structures";
   ra3_cmd_names[0xF8] = "left click";
+  ra3_cmd_names[0xF9] = "unit ungarrisons structure (automatic event) (?)";
   ra3_cmd_names[0xFA] = "create group";
   ra3_cmd_names[0xFB] = "select group";
 }
