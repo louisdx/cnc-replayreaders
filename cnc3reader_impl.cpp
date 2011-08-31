@@ -433,6 +433,7 @@ void populate_command_map_TW(command_map_t & tw_commands, command_names_t & tw_c
   tw_commands[0xFE] = -2;
   tw_commands[0xFF] = -2;
 
+  tw_cmd_names[0x57] = "30s heartbeat";
   tw_cmd_names[0x85] = "'scroll'";
   tw_cmd_names[0xF5] = "drag selection box and/or select units/structures";
   tw_cmd_names[0xF8] = "left click";
@@ -515,6 +516,7 @@ void populate_command_map_KW(command_map_t & kw_commands, command_names_t & kw_c
   kw_commands[0xFE] = -2;
   kw_commands[0xFF] = -2;
 
+  kw_cmd_names[0x61] = "30s heartbeat";
   kw_cmd_names[0x8F] = "'scroll'";
   kw_cmd_names[0xF5] = "drag selection box and/or select units/structures";
   kw_cmd_names[0xF8] = "left click";

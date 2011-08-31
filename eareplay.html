@@ -232,11 +232,19 @@ byte[chunk_size-11] payload;</div>
     frame that is a multiple of 15, as well as right at the very start, at timecode 1. This
     chunk is always 40 bytes long.</p>
 
-    <p>There are also heartbeats in the type-1 chunks. Every three seconds, when the timecode
-    is of the form 45<var>k</var>&nbsp;+&nbsp;1, each player emits a heartbeat command (whose ID
-    depends on the game). There is also another command, currently misdubbed &rdquo;scroll&ldquo;
-    (though it appears to have nothing to do with the camera) which is emitted irregularly, yet for
-    each player in equal number and at a rate of roughly one every two seconds.</p>
+    <p>There are also heartbeats in the type-1 chunks: In <em>Red
+    Alert 3</em>, every three seconds, when the timecode is of the
+    form 45<var>k</var>&nbsp;+&nbsp;1, each player emits a heartbeat
+    command with ID 0x21. In <em>Tiberium Wars</em> and
+    <em>Kane&rsquo;s Wrath</em>, a similar heartbeat occurs every 30
+    seconds at timecodes 450<var>k</var>&nbsp;+&nbsp;4 (or sometimes
+    +&nbsp;3), and the command ID is respectively 0x57 and 0x61.</p>
+
+    <p>Further, there is another command, currently misdubbed
+    &ldquo;scroll&rdquo; (though it appears to have nothing to do with
+    the camera), which is emitted irregularly, yet for each player in
+    equal number and at a rate of roughly one every two seconds. Its
+    ID is 0x85, 0x8F and 0x37 respectively in TW/KW/RA3.</p>
 
     <h3>Type-1 Command Chunks</h3>
 

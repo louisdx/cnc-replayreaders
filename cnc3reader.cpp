@@ -593,6 +593,8 @@ bool parse_replay_file(const char * filename, Options & opts)
               << std::endl << "Now dumping individual data blocks." << std::endl << std::endl;
   }
 
+  lastgood = int(myfile.tellg());
+
   for (int block_count = 0; !myfile.eof(); block_count++)
   {
     uint32_t len;
@@ -726,10 +728,12 @@ bool parse_replay_file(const char * filename, Options & opts)
 
         const unsigned int & c = j->first;
 
-        /* RA3 APM filter: 0x21: hearbeat
-                           0x37: some automatic, irregular sync command ("scroll"??)
+        /* RA3 APM filter: 0x37: some automatic, irregular sync command ("scroll"??)
+                           0x21: hearbeat, every 3 seconds
            KW  APM filter: 0x8F: some automatic, irregular sync command ("scroll"??)
+                           0x61: heartbeat, every 30 seconds
            TW  APM filter: 0x85: some automatic, irregular sync command ("scroll"??)
+                           0x57: heartbeat, every 30 seconds
 
 
            All games:      0xF5: drag selection box and/or select units. We could micro-filter this depending on how many units got selected.
@@ -737,8 +741,8 @@ bool parse_replay_file(const char * filename, Options & opts)
         */
           
         if ((gametype == Options::GAME_RA3 && c != 0x21 && c != 0x37) ||
-            (gametype == Options::GAME_TW  && c != 0x85)              ||
-            (gametype == Options::GAME_KW  && c != 0x8F) )
+            (gametype == Options::GAME_TW  && c != 0x85 && c != 0x57) ||
+            (gametype == Options::GAME_KW  && c != 0x8F && c != 0x61)   )
         {
           apm_total[i->first].first += j->second;
 
