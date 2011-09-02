@@ -177,7 +177,9 @@ uint32_t  footer_length;</div>
 
     <p>The <code>data</code> field is either of length 1 and takes the value 0x02, or otherwise <code>data</code>
     is of the form <code>{ 0x01, 0x02, uint32_t n, byte footer_payload[n] }</code> (so necessarily
-    <code>n + 6 + 8 + 17/18 == footer_length</code>). The meaning of <code>footer_payload</code> is unknown.</p>
+    <code>n + 6 + 8 + 17/18 == footer_length</code>). The meaning of <code>footer_payload</code> is unknown,
+    although it appears that the final 18 bytes (when <code>n</code> is 32 or 36, in RA3 only) are
+    IEEE754 32-bit floats, perhaps the kill/death ratio of players 1 to 6.</p>
 
     <p><strong>Warning:</strong> While it appears that the footer could in principle have any length, only certain
     specific forms of footers may be recognized by the games.</p>
@@ -204,15 +206,26 @@ byte[chunk_size-5] payload;</div>
     <p><strong>Type 2:</strong> <code>data[chunk_size]</code> has the following structure.</p>
     <div class="listing">byte;       // == 1
 byte;       // == 0
-uint32_t n; // maybe the player number, 0 &lt;= n &lt; number_of_players ?
+uint32_t n; // player number, index in the player list in the plain-text game info
 byte;       // == 0x0E in TW/KW, 0x0F in RA3
 uint32_t c; // == time_code;
 byte[chunk_size-11] payload;</div>
 
     <p>It appears that type-2 chunks only ever appear with chunk_size
-    24 or 40, and <code>n</code> always satisfies the stated bounds.
-    Type-2 chunks of size 24 always appear to have first byte 0x01 and
-    last byte 0x44 or 0x43.</p>
+    24 or 40. The chunk data, starting at <code>payload + 12</code>, appears to
+    consist of 3 or 7 IEEE754 32-bit floating point values. The first
+    three appear to be map coordinates (<var>x</var>, <var>z</var>,
+    <var>y</var>) in units of feet, and the last four values
+    appear to determine the camera angle and zoom. Specifically,
+    the structure of <code>payload</code> appears to be as follows:</p>
+
+    <div class="listing">byte      flags;        // 0x01: position, 0x02: rotation
+IF flags & 0x01
+  float32 position[3];  // (x, z, height) in units of feet
+ENDIF
+IF flags & 0x02
+  float32 rotation[4];  // quaternion components?
+ENDIF</div>
 
     <p>It is almost certain that chunks of type 2 contain camera
     movement data, and <code>n</code> is the player number, a
@@ -230,7 +243,8 @@ byte[chunk_size-11] payload;</div>
 
     <p>Each active player creates a type-2 heartbeat once every second, for every logical
     frame that is a multiple of 15, as well as right at the very start, at timecode 1. This
-    chunk is always 40 bytes long.</p>
+    chunk is always 40 bytes long and appears to contain the complete camera configuration
+    at that point.</p>
 
     <p>There are also heartbeats in the type-1 chunks: In <em>Red
     Alert 3</em>, every three seconds, when the timecode is of the
@@ -431,7 +445,8 @@ byte              payload[chunk_size - 12];</div>
     the footer, and the replay is concluded by as many bytes, which constitute the footer. (In that sense,
     the footer is merely another chunk of type 0xFFFF.)</p>
 
-    <p>It appears that the footer chunk size is always 64, so the footer chunk is 72 bytes long.</p>
+    <p>It appears that the footer chunk size is always 64, so the footer chunk is 72 bytes long. It is plausible
+    that part of the footer (the final 48 byte?) are 12 IEEE754 floats related to the kill/death ratio.</p>
 
 
     <h2>Generals, Zero Hour, Battle for Middle Earth, Rise of the Witch King</h2>

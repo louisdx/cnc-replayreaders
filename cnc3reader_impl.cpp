@@ -1,13 +1,9 @@
 #include "replayreader.h"
 
 const uint32_t TERM = 0x7FFFFFFF;
-const uint32_t ZERO = 0x0;
-const uint32_t NONZERO = 0x43;
 const char FOOTERCC[] = "C&C3 REPLAY FOOTER";
 const char FOOTERRA3[] = "RA3 REPLAY FOOTER";
-const char FINALCC20[] = { 0x01, 0x02, 0x00, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00 };
-const char FINALCC1B[] = { 0x02, 0x1B, 0x00, 0x00, 0x00 };
-const char FINALRA3[] = { 0x01, 0x02, 0x24, 0x00, 0x00, 0x00 };
+      char FINAL[] = { 0x02, 0x7F, 0x00, 0x00, 0x00 };
 
 std::string faction(unsigned int f, Options::GameType g)
 {
@@ -235,20 +231,10 @@ void fix_replay_file(const char * filename, Options & opts)
   std::cerr << "Rescued " << rescue_target << " bytes. Writing new footer." << std::endl;
 
   yourfile.write(reinterpret_cast<const char*>(&TERM), 4);
-  if (opts.gametype == Options::GAME_RA3)
-  {
-    yourfile.write(FOOTERRA3, 17);
-    yourfile.write(reinterpret_cast<char*>(&time_code), 4);
-    yourfile.write(FINALRA3, 6);
-    for (size_t i = 0; i < 9; ++i) yourfile.write(reinterpret_cast<const char*>(&ZERO), 4);
-    yourfile.write(reinterpret_cast<const char*>(&NONZERO), 4);
-  }
-  else
-  {
-    yourfile.write(FOOTERCC, 18);
-    yourfile.write(reinterpret_cast<char*>(&time_code), 4);
-    yourfile.write(FINALCC1B, 5);
-  }
+  if (opts.gametype == Options::GAME_RA3) { FINAL[1] = 0x1A; yourfile.write(FOOTERRA3, 17); }
+  else                                    { FINAL[1] = 0x1B; yourfile.write(FOOTERCC,  18); }
+  yourfile.write(reinterpret_cast<char*>(&time_code), 4);
+  yourfile.write(FINAL, 5);
 }
 
 bool parse_chunk1_fixlen(const unsigned char * buf, size_t & pos, size_t opos, 
@@ -895,8 +881,14 @@ bool dumpchunks(const unsigned char * buf, char chunktype, unsigned int chunklen
         {
           fprintf(stdout, "Chunk number 0x%08X (timecode: %s, count %u, length: %u): Type: %u. Number (Player ID?): %u. Payload:\n",
                   timecode, timecode_to_string(timecode).c_str(), block_count, chunklen, chunktype, player_id);
-          hexdump(stdout, buf+11, chunklen-11, "  ");
-          fprintf(stdout, "\n");
+
+          if (opts.dumpchunkswithraw)
+            hexdump(stdout, buf+11, chunklen-11, "  ");
+
+          fprintf(stdout, "  As floats:");
+          for (size_t i = 12; i + 4 <= chunklen; i += 4)
+            fprintf(stdout, " %7.2f", *reinterpret_cast<const float*>(buf + i));
+          fprintf(stdout, "\n\n");
         }
       }
 

@@ -433,7 +433,7 @@ bool parse_replay_file(const char * filename, Options & opts)
 
         uint32_t v = std::strtoul(subsubtokens[1].c_str(), NULL, 16);
 
-        if (subsubtokens[0][0] == 'C')
+        if (subtokens[i].size() > 2 && subtokens[i][0] == 'C' && subtokens[i][2] == ',')
         {
           fprintf(stdout, "Computer opponent:  %s (Faction: %s) Other data: \"",
                   subsubtokens[0].c_str(), faction(std::atoi(subsubtokens[2].c_str()), gametype).c_str());
@@ -678,6 +678,20 @@ bool parse_replay_file(const char * filename, Options & opts)
   for (size_t i = 0; i < footerdata.size(); ++i) fprintf(stdout, " 0x%02X", (unsigned char)(footerdata[i]));
   fprintf(stdout, ".\n");
 
+  if (footerdata.size() == 42 || footerdata.size() == 38)
+  {
+    fprintf(stdout, "Ints in the footer:");
+
+    for (size_t i = 6; i + 28 <= footerdata.size(); i += 4)
+      fprintf(stdout, " %i", *reinterpret_cast<const uint32_t*>(footerdata.data() + i));
+
+    fprintf(stdout, ". Six floats in the footer:");
+
+    for (size_t i = footerdata.size() - 24; i + 4 <= footerdata.size(); i += 4)
+      fprintf(stdout, " %6.2f", *reinterpret_cast<const float*>(footerdata.data() + i));
+    fprintf(stdout, "\n");
+  }
+
 
   /* Report APM stats */
   if (opts.apm)
@@ -760,6 +774,15 @@ bool parse_replay_file(const char * filename, Options & opts)
               it->first, it->second.first, double(it->second.first * 60 * 15)/double(final_timecode),
               it->second.second, double(it->second.second * 60 * 15)/double(final_timecode));
     }
+
+    if (footerdata.size() == 42 || footerdata.size() == 38)
+    {
+      fprintf(stdout, "\nKill/death ratios:\n");
+
+      for (size_t i = footerdata.size() - 24, n = 0; i + 4 <= footerdata.size(); i += 4)
+        fprintf(stdout, "  Player %u: %6.2f\n", n++, *reinterpret_cast<const float*>(footerdata.data() + i));
+    }
+
   }
 
   return true;
