@@ -174,3 +174,25 @@ std::string timecode_to_string(unsigned int tc)
   os << tc/15/60 << ":" << std::setw(2) << std::setfill('0') << (tc/15)%60 << "::" << std::setw(2) << std::setfill('0') << tc%15;
   return os.str();
 }
+
+
+std::set<int> parse_int_sequence_arg(char * str)
+{
+  char * s = str;
+  std::set<int> result;
+
+  while (*s)
+  {
+    const char * p = s;
+
+    long int n = std::strtol(p, &s, 0);
+
+    if (s == p) break;  // error
+
+    result.insert(n);
+
+    while (*s && *s == ',') ++s;
+  }
+
+  return result;
+}

@@ -175,8 +175,19 @@ bool parse_replay_file(const char * filename, Options & opts)
 
   std::ofstream audioout;
 
-  if (opts.type != -1)
-    std::cerr << "Displaying only events of type " << opts.type << "." << std::endl;
+  if (!opts.type.empty())
+  {
+    std::cerr << "Displaying only events of type(s) ";
+    std::copy(opts.type.begin(), opts.type.end(), std::ostream_iterator<int>(std::cerr, " "));
+    std::cerr << "." << std::endl;
+  }
+
+  if (!opts.cmd_filter.empty())
+  {
+    std::cerr << "Displaying only type-1 chunk commands of type(s) ";
+    std::copy(opts.cmd_filter.begin(), opts.cmd_filter.end(), std::ostream_iterator<int>(std::cerr, " "));
+    std::cerr << "." << std::endl;
+  }
 
   if (opts.dumpaudio)
   {
@@ -437,16 +448,16 @@ bool parse_replay_file(const char * filename, Options & opts)
         {
           fprintf(stdout, "Computer opponent:  %s (Faction: %s) Other data: \"",
                   subsubtokens[0].c_str(), faction(std::atoi(subsubtokens[2].c_str()), gametype).c_str());
-          for (size_t j = 1; j < subsubtokens.size()-1; ++j) std::cout << subsubtokens[j] << ", ";
+          for (size_t j = 1; j < subsubtokens.size() - 1; ++j) std::cout << subsubtokens[j] << ", ";
         }
         else
         {
           fprintf(stdout, "Ingame player name: %s (Faction: %s, IP addr.: 0x%08X, %d.%d.%d.%d:%s) Other data: \"",
                   subsubtokens[0].c_str(), faction(std::atoi(subsubtokens[5].c_str()), gametype).c_str(), v,
                   v>>24, ((v<<8)>>24), ((v<<16)>>24), ((v<<24)>>24), subsubtokens[2].c_str());
-          for (size_t j = 3; j < subsubtokens.size()-1; ++j) std::cout << subsubtokens[j] << ", ";
+          for (size_t j = 3; j < subsubtokens.size() - 1; ++j) std::cout << subsubtokens[j] << ", ";
         }
-        std::cout << subsubtokens[subsubtokens.size()-1] << "\"." << std::endl;
+        std::cout << subsubtokens[subsubtokens.size() - 1] << "\"." << std::endl;
       }
     }
   }
@@ -636,7 +647,7 @@ bool parse_replay_file(const char * filename, Options & opts)
 
     if (opts.printraw)
     {
-      if (opts.type != -1 && opts.type != onebyte) continue;
+      if (is_filtered(onebyte, opts.type)) continue;
       fprintf(stdout, "\nBlock TC: 0x%08X, timecode: %s, length: %u bytes, count: %u, filepos: 0x%X, Chunk Type: %u.\n",
           dummy, timecode_to_string(dummy).c_str(), len, block_count, int(myfile.tellg()), onebyte);
 
@@ -727,7 +738,7 @@ bool parse_replay_file(const char * filename, Options & opts)
         const command_names_t::const_iterator nit = cmd_names.find(j->first);
         const std::string cn = nit == cmd_names.end() ? "" : nit->second;
         fprintf(stdout, "Raw player 0x%02X -->   command 0x%02X: %u (\"%s\")\n",
-                i->first, j->first, j->second, cn.c_str());
+                i->first, j->first, j->second.size(), cn.c_str());
       }
     }
 
@@ -738,7 +749,7 @@ bool parse_replay_file(const char * filename, Options & opts)
         const command_names_t::const_iterator nit = cmd_names.find(j->first);
         const std::string cn = nit == cmd_names.end() ? "" : nit->second;
         fprintf(stdout, "Player %u, command 0x%02X: %u (\"%s\")\n",
-                i->first, j->first, j->second, cn.c_str());
+                i->first, j->first, j->second.size(), cn.c_str());
 
         const unsigned int & c = j->first;
 
@@ -758,10 +769,33 @@ bool parse_replay_file(const char * filename, Options & opts)
             (gametype == Options::GAME_TW  && c != 0x85 && c != 0x57) ||
             (gametype == Options::GAME_KW  && c != 0x8F && c != 0x61)   )
         {
-          apm_total[i->first].first += j->second;
+          apm_total[i->first].first += j->second.size();
 
           if (c != 0xF8 && c != 0xF5)
-            apm_total[i->first].second += j->second;
+            apm_total[i->first].second += j->second.size();
+        }
+      }
+      fprintf(stdout, "\n");
+    }
+
+    if (!opts.time_series_filter.empty())
+    {
+      fprintf(stdout, "Event time series:\n");
+      for (apm_histo_map_t::const_iterator i = player_coal_histo_apm.begin(), end = player_coal_histo_apm.end(); i != end; ++i)
+      {
+        for (auto j = i->second.begin(), end = i->second.end(); j != end; ++j)
+        {
+          if (opts.time_series_filter.find(j->first) == opts.time_series_filter.end()) continue;
+
+          const command_names_t::const_iterator nit = cmd_names.find(j->first);
+          const std::string cn = nit == cmd_names.end() ? "" : nit->second;
+
+          fprintf(stdout, "Player %u, command 0x%02X (\"%s\"):", i->first, j->first, cn.c_str());
+          for (auto k = j->second.cbegin(), end = j->second.cend(); k != end; ++k)
+          {
+            std::cout << " " << timecode_to_string(*k);
+          }
+          fprintf(stdout, "\n");
         }
       }
       fprintf(stdout, "\n");

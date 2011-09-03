@@ -13,8 +13,10 @@
 #include <fstream>
 #include <sstream>
 #include <iomanip>
+#include <iterator>
 #include <vector>
 #include <map>
+#include <set>
 #include <algorithm>
 #include <stdexcept>
 #include <cstring>
@@ -84,13 +86,14 @@ struct Options
 {
   enum GameType { GAME_UNDEF = 0, GAME_KW, GAME_TW, GAME_RA3 };
 
-  Options() : type(-1), cmd_filter(-1), fixpos(0), fixfn(NULL), audiofn(NULL),
+  Options() : type(), cmd_filter(), time_series_filter(), fixpos(0), fixfn(NULL), audiofn(NULL),
               autofix(false), breakonerror(false), dumpchunks(false), dumpchunkswithraw(false),
               dumpaudio(false), filter_heartbeat(-1), printraw(false),
               apm(false), fixbroken(false), gametype(GAME_UNDEF), verbose(false) {}
 
-  int type;
-  int cmd_filter;
+  std::set<int> type;
+  std::set<int> cmd_filter;
+  std::set<int> time_series_filter;
   unsigned int fixpos;
   const char * fixfn;
   const char * audiofn;
@@ -109,7 +112,8 @@ struct Options
 
 typedef std::map<unsigned int, unsigned int> apm_1_map_t;
 typedef std::map<unsigned int, apm_t>        apm_2_map_t;
-typedef std::map<int, std::map<unsigned int, unsigned int> > apm_histo_map_t;
+//typedef std::map<int, std::map<unsigned int, unsigned int> > apm_histo_map_t;
+typedef std::map<int, std::map<unsigned int, std::multiset<unsigned int>>> apm_histo_map_t;
 
 typedef std::map<unsigned int, int> command_map_t;
 typedef std::map<unsigned int, std::string> command_names_t;
@@ -166,5 +170,17 @@ std::string read2ByteStringN(std::istream & in, size_t N);
  */
 void codepointToUTF8(unsigned int cp, codepoint_t * szOut);
 
+
+/** Parses an argument of the form "5,8,-7,0xAB" into a set of intergers.
+ */
+std::set<int> parse_int_sequence_arg(char * str);
+
+
+/** Checks whether a filter list is non-empty and a given value is in it.
+ */
+inline bool is_filtered(int value, const std::set<int> & filterlist)
+{
+  return !filterlist.empty() && filterlist.find(value) == filterlist.end();
+}
 
 #endif

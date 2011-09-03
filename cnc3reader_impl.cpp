@@ -59,7 +59,7 @@ bool parse_options(int argc, char * argv[], Options & opts)
 {
   int opt;
 
-  while ((opt = getopt(argc, argv, "A:t:T:f:F:egaRcCkwrpH:vh")) != -1)
+  while ((opt = getopt(argc, argv, "A:t:T:f:F:egaRcCkwrpP:H:vh")) != -1)
   {
     switch (opt)
     {
@@ -84,10 +84,10 @@ bool parse_options(int argc, char * argv[], Options & opts)
       opts.audiofn = optarg;
       break;
     case 't':
-      opts.type = atoi(optarg);
+      opts.type = parse_int_sequence_arg(optarg);
       break;
     case 'T':
-      opts.cmd_filter = std::strtol(optarg, NULL, 0);
+      opts.cmd_filter = parse_int_sequence_arg(optarg);
       break;
     case 'c':
       opts.dumpchunks = true;
@@ -106,6 +106,9 @@ bool parse_options(int argc, char * argv[], Options & opts)
     case 'p':
       opts.apm = true;
       break;
+    case 'P':
+      opts.time_series_filter = parse_int_sequence_arg(optarg);
+      break;
     case 'k':
       opts.gametype = Options::GAME_KW;
       break;
@@ -121,7 +124,7 @@ bool parse_options(int argc, char * argv[], Options & opts)
     case 'h':
     default:
       std::cout << std::endl
-                << "Usage:  cnc3reader [-c|-C|-R] [-a] [-A audiofilename] [-w|-k|-r] [-t type] [-g] [-e] filename [filename]..." << std::endl
+                << "Usage:  cnc3reader [-c|-C|-R] [-a] [-A audiofilename] [-w|-k|-r] [-t type] [-T cmd] [-g] [-e] [-p] [-P cmd] filename [filename]..." << std::endl
                 << "        cnc3reader -f pos [-F name] [-w|-k|-r] filename" << std::endl
                 << "        cnc3reader -h" << std::endl << std::endl
                 << "        -c:          dump chunks (smart parsing)" << std::endl
@@ -132,12 +135,14 @@ bool parse_options(int argc, char * argv[], Options & opts)
                 << "        -t type:     filter chunks of type 'type'; only effective with '-c' or '-r'" << std::endl
                 << "        -T cmd:      filter type-1 chunks with command number 'cmd'; only effective with '-c'" << std::endl
                 << "        -p:          gather APM statistics" << std::endl
+                << "        -P cmd:      display time series for commands" << std::endl
                 << "        -w, -k, -r:  interpret as Tiberium Wars / Kane's Wrath / Red Alert 3 replay (otherwise treat as Kane's Wrath if unsure)" << std::endl
                 << "        -f pos:      attempt to fix the replay file from last good position pos" << std::endl
                 << "        -F name:     output filename for fixed replay file" << std::endl
                 << "        -g:          automatically attempt to fix broken replays" << std::endl
                 << "        -e:          stop processing if an error occurs and return non-zero return value" << std::endl
                 << "        -h:          print usage information (this)" << std::endl
+                << std::endl << "  The filters -t, -T and -P accept a comma-separated series of values, for example \"-t 3,4\"." << std::endl
                 << std::endl;
       return false;
     }
@@ -148,13 +153,15 @@ bool parse_options(int argc, char * argv[], Options & opts)
     std::cerr << "Will attempt to fix broken replays automatically." << std::endl;
     opts.printraw = true;
     opts.dumpchunks = true;
-    opts.type = 0;
+    opts.type.clear();
+    opts.type.insert(0);
   }
 
   if (opts.apm)
   {
     opts.dumpchunks = true;
-    opts.cmd_filter = 0xFFFF;
+    opts.cmd_filter.clear();
+    opts.cmd_filter.insert(0xFFFF);
   }
 
   return true;
@@ -243,7 +250,7 @@ bool parse_chunk1_fixlen(const unsigned char * buf, size_t & pos, size_t opos,
 {
   if (buf[opos + cmd_len - 1] == 0xFF)
   {
-    if (opts.cmd_filter == -1 || opts.cmd_filter == int(cmd_id))
+    if (!is_filtered(int(cmd_id), opts.cmd_filter))
     {
       fprintf(stdout, " %2i: Command 0x%02X, fixed length %u.\n", counter, cmd_id, cmd_len);
       hexdump(stdout, buf + opos, cmd_len, "     ");
@@ -272,7 +279,7 @@ bool parse_chunk1_varlen(const unsigned char * buf, size_t & pos,
   {
     const size_t adv = (buf[pos] >> 4) + 1;
 
-    if (opts.dumpchunkswithraw && (opts.cmd_filter == -1 || opts.cmd_filter == int(cmd_id)))
+    if (opts.dumpchunkswithraw && (!is_filtered(int(cmd_id), opts.cmd_filter)))
     {
       fprintf(stdout, "    --> lenbyteval: %u, values:", buf[pos] & 0x0F);
       for (size_t i = 0; i != adv; ++i) fprintf(stdout, " %u", READ_UINT32LE(buf + pos + 1 + 4 * i));
@@ -284,7 +291,7 @@ bool parse_chunk1_varlen(const unsigned char * buf, size_t & pos,
 
   ++pos;
 
-  if (opts.cmd_filter == -1 || opts.cmd_filter == int(cmd_id))
+  if (!is_filtered(int(cmd_id), opts.cmd_filter))
   {
     fprintf(stdout, " %2i: Command 0x%02X, variable length %u.\n", counter, cmd_id, pos - opos);
     hexdump(stdout, buf + opos, pos - opos, "     ");
@@ -300,7 +307,7 @@ bool parse_chunk1_uuid(const unsigned char * buf, size_t & pos, size_t len, unsi
 
   std::string s1(buf + pos + 4, buf + pos + 4 + l);
 
-  if (opts.cmd_filter == -1 || opts.cmd_filter == int(cmd_id))
+  if (!is_filtered(int(cmd_id), opts.cmd_filter))
     fprintf(stdout, " %2i: Command 0x%02X: First string length %u, \"%s\".", counter, cmd_id, l, s1.c_str());
 
   pos += l + 5;
@@ -313,7 +320,7 @@ bool parse_chunk1_uuid(const unsigned char * buf, size_t & pos, size_t len, unsi
   pos += 2 * l + 2;
   if (len < l) return false;
 
-  if (opts.cmd_filter == -1 || opts.cmd_filter == int(cmd_id))
+  if (!is_filtered(int(cmd_id), opts.cmd_filter))
     fprintf(stdout, " Second string length %u, \"%s\". Number: 0x%08X.\n", l, s2.c_str(), READ_UINT32LE(buf + pos));
 
   pos += 5;
@@ -625,7 +632,7 @@ bool dumpchunks(const unsigned char * buf, char chunktype, unsigned int chunklen
       // Chunk type 1
       if (chunktype == 1 && buf[0] == 1 && buf[chunklen-1] == 0xFF && READ_UINT32LE(buf+chunklen) == 0)
       {
-        if (opts.type != -1 && opts.type != 1) return true;
+        if (is_filtered(1, opts.type)) return true;
 
         const size_t ncommands = READ_UINT32LE(buf+1);
 
@@ -651,8 +658,8 @@ bool dumpchunks(const unsigned char * buf, char chunktype, unsigned int chunklen
           const unsigned int cmd_id = buf[opos];
           const unsigned int player_id = buf[opos + 1];
 
-          ++player_indi_histo_apm[player_id][cmd_id];
-          ++player_coal_histo_apm[mangle_player(player_id, gametype)][cmd_id];
+          player_indi_histo_apm[player_id][cmd_id].insert(timecode);;
+          player_coal_histo_apm[mangle_player(player_id, gametype)][cmd_id].insert(timecode);
           ++player_1_apm[mangle_player(player_id, gametype)];
 
           command_map_t::const_iterator c = commands.find(cmd_id);
@@ -675,7 +682,7 @@ bool dumpchunks(const unsigned char * buf, char chunktype, unsigned int chunklen
               {
                 size_t l = buf[pos + 3] + 1;
                 pos += 4 * l + 5;
-                if (opts.cmd_filter == -1 || opts.cmd_filter == int(cmd_id))
+                if (!is_filtered(int(cmd_id), opts.cmd_filter))
                 {
                   fprintf(stdout, " %2i: Command 0x%02X, special length %u.\n", counter, cmd_id, pos - opos);
                 }
@@ -695,7 +702,7 @@ bool dumpchunks(const unsigned char * buf, char chunktype, unsigned int chunklen
                   const size_t l = buf[pos + 17] + 1;
                   pos += 4 * l + 32;
                 }
-                if (opts.cmd_filter == -1 || opts.cmd_filter == int(cmd_id))
+                if (!is_filtered(int(cmd_id), opts.cmd_filter))
                 {
                   fprintf(stdout, " %2i: Command 0x%02X, special length %u.\n", counter, cmd_id, pos - opos);
                 }
@@ -705,7 +712,7 @@ bool dumpchunks(const unsigned char * buf, char chunktype, unsigned int chunklen
                 const size_t l = (buf[pos + 24] + 1) * 2 + 26;
                 pos += l;
 
-                if (opts.cmd_filter == -1 || opts.cmd_filter == int(cmd_id))
+                if (!is_filtered(int(cmd_id), opts.cmd_filter))
                 {
                   fprintf(stdout, " %2i: Command 0x%02X, special length %u.\n", counter, cmd_id, pos - opos);
                 }
@@ -714,7 +721,7 @@ bool dumpchunks(const unsigned char * buf, char chunktype, unsigned int chunklen
               {
                 const size_t l = buf[pos + 2] == 0x14 ? 12 : (buf[pos + 2] == 0x04 ? 13 : 99999);
 
-                if (opts.cmd_filter == -1 || opts.cmd_filter == int(cmd_id))
+                if (!is_filtered(int(cmd_id), opts.cmd_filter))
                   fprintf(stdout, " %2i: Command 0x%02X, special length %u.\n", counter, cmd_id, l);
 
                 pos += l;
@@ -723,7 +730,7 @@ bool dumpchunks(const unsigned char * buf, char chunktype, unsigned int chunklen
               {
                 const size_t l = buf[pos + 2] == 0x04 ? 8 : (buf[pos + 2] == 0x07 ? 16 : 99999);
 
-                if (opts.cmd_filter == -1 || opts.cmd_filter == int(cmd_id))
+                if (!is_filtered(int(cmd_id), opts.cmd_filter))
                   fprintf(stdout, " %2i: Command 0x%02X, special length %u.\n", counter, cmd_id, l);
 
                 pos += l;
@@ -747,7 +754,7 @@ bool dumpchunks(const unsigned char * buf, char chunktype, unsigned int chunklen
               {
                 size_t l = buf[pos + 12];
                 pos += l * 18 + 17;
-                if (opts.cmd_filter == -1 || opts.cmd_filter == int(cmd_id))
+                if (!is_filtered(int(cmd_id), opts.cmd_filter))
                 {
                   fprintf(stdout, " %2i: Command 0x%02X, special length %u.\n", counter, cmd_id, pos - opos);
                 }
@@ -756,7 +763,7 @@ bool dumpchunks(const unsigned char * buf, char chunktype, unsigned int chunklen
               {
                 pos += (buf[pos + 17] + 1) * 4 + 32;
 
-                if (opts.cmd_filter == -1 || opts.cmd_filter == int(cmd_id))
+                if (!is_filtered(int(cmd_id), opts.cmd_filter))
                 {
                   fprintf(stdout, " %2i: Command 0x%02X, special length %u.\n", counter, cmd_id, pos - opos);
                 }
@@ -766,7 +773,7 @@ bool dumpchunks(const unsigned char * buf, char chunktype, unsigned int chunklen
               {
                 pos += buf[pos + 7] == 0xFF ? 8 : 26;
 
-                if (opts.cmd_filter == -1 || opts.cmd_filter == int(cmd_id))
+                if (!is_filtered(int(cmd_id), opts.cmd_filter))
                 {
                   fprintf(stdout, " %2i: Command 0x%02X, special length %u.\n", counter, cmd_id, pos - opos);
                 }
@@ -797,7 +804,7 @@ bool dumpchunks(const unsigned char * buf, char chunktype, unsigned int chunklen
                 {
                   pos += 32 + 4 * (buf[pos + 30] + 1);
                 }
-                if (opts.cmd_filter == -1 || opts.cmd_filter == int(cmd_id))
+                if (!is_filtered(int(cmd_id), opts.cmd_filter))
                 {
                   fprintf(stdout, " %2i: Command 0x%02X, special length %u.\n", counter, cmd_id, pos - opos);
                 }
@@ -806,7 +813,7 @@ bool dumpchunks(const unsigned char * buf, char chunktype, unsigned int chunklen
               {
                 size_t l = buf[pos + 12];
                 pos += l * 18 + 17;
-                if (opts.cmd_filter == -1 || opts.cmd_filter == int(cmd_id))
+                if (!is_filtered(int(cmd_id), opts.cmd_filter))
                 {
                   fprintf(stdout, " %2i: Command 0x%02X, special length %u.\n", counter, cmd_id, pos - opos);
                 }
@@ -825,7 +832,7 @@ bool dumpchunks(const unsigned char * buf, char chunktype, unsigned int chunklen
               }
             }
 
-            if (opts.cmd_filter == -1 || opts.cmd_filter == int(cmd_id))
+            if (!is_filtered(int(cmd_id), opts.cmd_filter))
             {
               hexdump(stdout, buf + opos, pos - opos, s);
             }
@@ -873,9 +880,10 @@ bool dumpchunks(const unsigned char * buf, char chunktype, unsigned int chunklen
           else                     player_2_apm[player_id].counter[3]++;
         }
 
-        if (opts.type != -1 && opts.type != 2) return true;
-        if (opts.type == 2 && opts.filter_heartbeat == 1 && timecode % 15 && timecode != 1) return true;
-        if (opts.type == 2 && opts.filter_heartbeat == 0 && (timecode % 15 == 0 || timecode == 1)) return true;
+        if (is_filtered(2, opts.type)) return true;
+
+        if (opts.type.count(2) != 0 && opts.filter_heartbeat == 1 && timecode % 15 && timecode != 1) return true;
+        if (opts.type.count(2) != 0 && opts.filter_heartbeat == 0 && (timecode % 15 == 0 || timecode == 1)) return true;
 
         if (!opts.apm)
         {
@@ -906,7 +914,7 @@ bool dumpchunks(const unsigned char * buf, char chunktype, unsigned int chunklen
           audioout.write(reinterpret_cast<const char*>(buf) + 15, chunklen - 15);
         }
 
-        if (opts.type != -1 && opts.type != 3) return true;
+        if (is_filtered(3, opts.type)) return true;
 
         if (!opts.apm)
         {
@@ -920,7 +928,7 @@ bool dumpchunks(const unsigned char * buf, char chunktype, unsigned int chunklen
       // Chunk type 3 (empty)
       else if (chunktype == 3 && buf[0] == 0 && buf[1] == 0 && chunklen == 2 && READ_UINT32LE(buf+chunklen) == 0 && hsix  == 0x1E)
       {
-        if (opts.type != -1 && opts.type != 3) return true;
+        if (is_filtered(3, opts.type)) return true;
 
         if (!opts.apm)
         {
@@ -933,7 +941,7 @@ bool dumpchunks(const unsigned char * buf, char chunktype, unsigned int chunklen
       else if (chunktype == 4 && buf[0] == 1 && buf[1] == 0 && buf[6] == 0x0F &&
                READ_UINT32LE(buf+7) == timecode && READ_UINT32LE(buf+chunklen) == 0 && hsix  == 0x1E)
       {
-        if (opts.type != -1 && opts.type != 4) return true;
+        if (is_filtered(4, opts.type)) return true;
 
         if (!opts.apm)
         {
@@ -947,7 +955,7 @@ bool dumpchunks(const unsigned char * buf, char chunktype, unsigned int chunklen
       // Chunk type 4 (empty)
       else if (chunktype == 4 && buf[0] == 0 && buf[1] == 0 && chunklen == 2 && READ_UINT32LE(buf+chunklen) == 0 && hsix  == 0x1E)
       {
-        if (opts.type != -1 && opts.type != 4) return true;
+        if (is_filtered(4, opts.type)) return true;
 
         if (!opts.apm)
         {
@@ -959,7 +967,7 @@ bool dumpchunks(const unsigned char * buf, char chunktype, unsigned int chunklen
       // Chunk type 1, skirmish, empty chunk
       else if (chunktype == 1 && chunklen == 5 && hnumber1 == 4 && READ_UINT32LE(buf+chunklen) == 0 && READ_UINT32LE(buf+1) == 0 && buf[0] == 1)
       {
-        if (opts.type != -1 && opts.type != 1) return true;
+        if (is_filtered(1, opts.type)) return true;
 
         if (!opts.apm)
         {
@@ -971,7 +979,7 @@ bool dumpchunks(const unsigned char * buf, char chunktype, unsigned int chunklen
       // Chunk type 254 (RA3 only)
       else if (chunktype == -2 && READ_UINT32LE(buf+chunklen) == 0)
       {
-        if (opts.type != -1 && opts.type != -2) return true;
+        if (is_filtered(-2, opts.type)) return true;
 
         if (!opts.apm)
         {
