@@ -1,10 +1,11 @@
 /*****************************************
  * Schneider's Replay Reader for TW/KW/RA3
- * Handle with care.        
+ * Handle with care.
  *
  * Compile like this:
- *  g++ -O2 -s -o cnc3reader.exe cnc3reader.cpp cnc3readerimpl.cpp replayreader.cpp \
- *      -enable-auto-import -static-libgcc -static-libstdc++ -fwhole-program
+ *  g++ -std=c++11 -O3 -s -o cnc3reader.exe \
+ *      cnc3reader.cpp cnc3reader_impl.cpp replayreader.cpp \
+ *      -enable-auto-import -static-libgcc -static-libstdc++
  *
  ******************************************/
 

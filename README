@@ -44,9 +44,11 @@ counter.
 Compilation
 -----------
 
-The following compiler invocation should work for all programs:
+The following compiler invocations should work:
 
-    g++ -o cnc3reader cnc3reader.cpp -W -Wall -Wextra -O3 -march=native -s -std=c++0x -fwhole-program
+    g++ -o cnc3reader cnc3reader.cpp cnc3reader_impl.cpp replayreader.cpp -W -Wall -Wextra -O3 -march=native -s -std=c++11
+    g++ -o cnc4reader cnc4reader.cpp replayreader.cpp -W -Wall -Wextra -O3 -march=native -s -std=c++11
+    g++ -o ccgzhreader ccgzhreader.cpp -W -Wall -Wextra -O3 -march=native -s -std=c++11
 
 Windows users using MingW should add "-enable-auto-import -static-libgcc -static-libstdc++"
 to create free-standing executables without load-time dependencies on the C and C++ libraries.

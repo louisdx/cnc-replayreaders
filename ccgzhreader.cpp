@@ -10,11 +10,10 @@
 #include <ctime>
 
 /* MingW32/Windows:
-   g++ -O4 -s -o ccgzhreader ccgzhreader.cpp -march=native -fwhole-program -std=gnu++0x -fno-strict-aliasing -enable-auto-import -static-libgcc -static-libstdc++
+   g++ -std=c++11 -O3 -s -o ccgzhreader ccgzhreader.cpp -march=native -fno-strict-aliasing -enable-auto-import -static-libgcc -static-libstdc++
 
    Linux etc.
-   g++ -O4 -s -o ccgzhreader ccgzhreader.cpp -march=native -fwhole-program -std=gnu++0x -fno-strict-aliasing
-
+   g++ -std=c++11 -O3 -s -o ccgzhreader ccgzhreader.cpp -march=native -fno-strict-aliasing
  */
 
 #define READ(f, x) do { f.read(reinterpret_cast<char*>(&x), sizeof(x)); } while (false)
