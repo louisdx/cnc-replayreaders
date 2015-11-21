@@ -206,6 +206,7 @@ void fix_replay_file(const char * filename, Options & opts)
   if (myfile.eof() || filesize - myfile.tellg() < chunk_size + 4)
   {
     std::cerr << "Error: Specified rescue position (" << opts.fixpos << ") does not point to a good chunk. Aborting." << std::endl;
+    return;
   }
   else
   {
@@ -216,6 +217,7 @@ void fix_replay_file(const char * filename, Options & opts)
   if (!yourfile)
   {
     std::cerr << "Error opening output file \"" << opts.fixfn << "\", aborting." << std::endl;
+    return;
   }
 
   const unsigned int BUFSIZE = 65536, rescue_target = opts.fixpos + 13 + chunk_size;
